@@ -108,3 +108,11 @@ Configure no `.env`: `EVOLUTION_URL`, `EVOLUTION_INSTANCE`, `EVOLUTION_TOKEN` (t
 Pedido não pago: conferido a cada 10 min, enviado das 8h às 21h. Lembrete e atraso: o servidor confere de hora em hora, só envia das 9h às 20h (`NOTIFY_TIMEZONE`)
 e cada aviso sai uma vez por mês (tabela `notifications_sent`). Mensagens ao cliente só saem se ele
 informou WhatsApp; desligue todas com `WHATSAPP_CUSTOMER_MESSAGES=off`.
+
+## Produção (Easypanel / Docker)
+
+O projeto tem `Dockerfile`. No Easypanel: Fonte **Git** → `https://github.com/leovieirafreitas/controlclaude.git`, ramo `main`;
+Construção → **Dockerfile**; porta do domínio **3000**. Variáveis de ambiente: as mesmas do `.env` (modelo em `.env.example`),
+com `APP_URL=https://seu-dominio` e `NODE_ENV=production`.
+
+Rotas em produção: `/` página de vendas · `/admin` painel · `/conta` área do assinante · `/termos` · `/privacidade`.

@@ -8,6 +8,7 @@ const salesRoute = {
   name: 'sales-route',
   configureServer(server) {
     server.middlewares.use((req, res, next) => {
+      if (req.url === '/admin' || req.url.startsWith('/admin?')) req.url = req.url.replace('/admin', '/index.html');
       for (const page of ['/assinar', '/conta', '/termos', '/privacidade']) {
         if (req.url === page || req.url.startsWith(`${page}?`)) req.url = req.url.replace(page, `${page}.html`);
       }
