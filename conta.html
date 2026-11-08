@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Control Claude · Minha conta</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="./src/sales.css">
+  <link rel="stylesheet" href="./src/conta.css">
+  <link rel="stylesheet" href="./src/controls.css">
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a href="/assinar" class="brand"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></a>
+      <nav class="nav-links">
+        <a href="/assinar">Planos</a>
+        <button class="btn btn-ghost btn-sm hidden" id="logout">Sair</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap account">
+    <div id="loading" class="center muted">Carregando…</div>
+
+    <!-- ============ ENTRAR / CRIAR CONTA ============ -->
+    <section id="auth" class="auth-card hidden">
+      <div id="chosen-plan" class="chosen hidden"></div>
+
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="login" class="active">Entrar</button>
+        <button type="button" role="tab" data-tab="register">Criar conta</button>
+      </div>
+
+      <!-- Entrar -->
+      <form id="login-form" class="pane" novalidate>
+        <label>E-mail<input name="email" type="email" autocomplete="email" required></label>
+        <label>Senha
+          <span class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="eye" aria-label="Mostrar senha">Mostrar</button></span>
+        </label>
+        <p class="form-error hidden"></p>
+        <button class="btn btn-primary btn-lg btn-block">Entrar</button>
+        <button type="button" class="link center-link" data-go="forgot">Esqueci minha senha</button>
+      </form>
+
+      <!-- Criar conta -->
+      <form id="register-form" class="pane hidden" novalidate>
+        <label>Nome completo<input name="name" autocomplete="name" required maxlength="120"></label>
+        <label>E-mail<input name="email" type="email" autocomplete="email" required maxlength="160"></label>
+        <div class="two">
+          <label>Data de nascimento<input name="birth_date" type="date" autocomplete="bday" required></label>
+          <label>WhatsApp<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" placeholder="(11) 91234-5678" required></label>
+        </div>
+        <label>Senha
+          <span class="pw"><input name="password" type="password" autocomplete="new-password" minlength="8" required><button type="button" class="eye" aria-label="Mostrar senha">Mostrar</button></span>
+          <span class="hint">Mínimo de 8 caracteres, com letras e números.</span>
+        </label>
+        <label>Confirme a senha<input name="password2" type="password" autocomplete="new-password" required></label>
+        <label class="hp" aria-hidden="true">Site<input name="website" tabindex="-1" autocomplete="off"></label>
+        <label class="check"><input type="checkbox" name="accept_terms" value="1" required><span>Li e aceito os <a href="/termos" target="_blank">Termos de uso</a> e a <a href="/privacidade" target="_blank">Política de privacidade</a>.</span></label>
+        <p class="form-error hidden"></p>
+        <button class="btn btn-primary btn-lg btn-block" id="register-btn">Criar conta</button>
+        <p class="fine">Seus dados são usados só para gerenciar sua assinatura, conforme a <a href="/privacidade" target="_blank">Política de privacidade</a>.</p>
+      </form>
+
+
+      <!-- Esqueci a senha -->
+      <form id="forgot-form" class="pane hidden" novalidate>
+        <h2>Recuperar senha</h2>
+        <p class="muted">Digite o e-mail da sua conta. Enviaremos um código pelo WhatsApp cadastrado (e por e-mail) para você criar uma nova senha.</p>
+        <label>E-mail<input name="email" type="email" autocomplete="email" required></label>
+        <p class="form-error hidden"></p>
+        <button class="btn btn-primary btn-lg btn-block">Enviar código</button>
+        <button type="button" class="link center-link" data-go="login">Voltar para entrar</button>
+      </form>
+
+      <form id="reset-form" class="pane hidden" novalidate>
+        <h2>Nova senha</h2>
+        <p class="muted" id="reset-hint"></p>
+        <label>Código de 6 dígitos<input name="code" class="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+        <label>Nova senha
+          <span class="pw"><input name="password" type="password" autocomplete="new-password" required><button type="button" class="eye" aria-label="Mostrar senha">Mostrar</button></span>
+          <span class="hint">Mínimo de 8 caracteres, com letras e números.</span>
+        </label>
+        <p class="form-error hidden"></p>
+        <button class="btn btn-primary btn-lg btn-block">Salvar nova senha</button>
+        <button type="button" class="link center-link" data-go="login">Voltar para entrar</button>
+      </form>
+      <p class="auth-support hidden" id="auth-support">Precisa de ajuda? <a class="support-link" target="_blank" rel="noopener">Fale com o suporte no WhatsApp</a></p>
+    </section>
+
+    <!-- ============ PAINEL ============ -->
+    <section id="panel" class="hidden">
+      <div id="flash" class="flash hidden"></div>
+      <h1 class="hello">Olá, <span id="first-name"></span></h1>
+
+      <!-- sem plano / escolher plano -->
+      <article class="card hidden" id="choose">
+        <div class="card-head"><h2 id="choose-title">Escolha seu plano</h2></div>
+        <div class="mini-plans" id="mini-plans"></div>
+      </article>
+
+      <div class="grid">
+        <article class="card plan-card hidden" id="sub-card">
+          <div class="card-head">
+            <h2>Seu plano</h2>
+            <span class="status" id="status"></span>
+          </div>
+          <p class="plan-name" id="plan-name"></p>
+          <p class="plan-price" id="plan-price"></p>
+          <dl class="facts">
+            <div><dt>Assinante desde</dt><dd id="since"></dd></div>
+            <div><dt>Vencimento</dt><dd id="due"></dd></div>
+          </dl>
+          <p class="muted small" id="charge-info"></p>
+          <div class="actions-row">
+            <button class="btn btn-primary btn-lg" id="pay-btn">Pagar mensalidade</button>
+            <button class="btn btn-ghost" id="check-btn">Já paguei, atualizar</button>
+          </div>
+          <div class="row-links">
+            <button class="link" id="change-btn">Escolher outro plano</button>
+            <button class="link danger" id="cancel-btn">Cancelar plano</button>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><h2>Seus dados</h2></div>
+          <form id="data-form" novalidate>
+            <label>Nome completo<input name="name" autocomplete="name" required maxlength="120"></label>
+            <label>E-mail<input name="email" type="email" disabled></label>
+            <div class="two">
+              <label>Data de nascimento<input name="birth_date" type="date" required></label>
+              <label>WhatsApp<input name="phone" type="tel" inputmode="tel" maxlength="30" placeholder="(11) 91234-5678" required></label>
+            </div>
+            <p class="form-error hidden"></p>
+            <button class="btn btn-outline">Salvar alterações</button>
+          </form>
+          <details class="pw-change">
+            <summary>Alterar senha</summary>
+            <form id="password-form" novalidate>
+              <label>Senha atual<input name="current_password" type="password" autocomplete="current-password" required></label>
+              <label>Nova senha<input name="new_password" type="password" autocomplete="new-password" required><span class="hint">Mínimo de 8 caracteres, com letras e números.</span></label>
+              <p class="form-error hidden"></p>
+              <button class="btn btn-outline">Alterar senha</button>
+            </form>
+          </details>
+        </article>
+      </div>
+
+      <article class="card hidden" id="payments-card">
+        <div class="card-head"><h2>Pagamentos</h2></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Data</th><th>Referência</th><th>Forma</th><th class="r">Valor</th></tr></thead>
+            <tbody id="payments"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card support-card hidden" id="support-card">
+        <div class="support-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-13.5 7.8L3 21l1.2-4.5A9 9 0 1 1 21 12Z"/></svg></div>
+        <div class="support-text">
+          <h2>Suporte</h2>
+          <p>Dúvidas sobre seu plano ou pagamento? Fale com a gente pelo WhatsApp: <strong id="support-number"></strong></p>
+        </div>
+        <a class="btn btn-primary support-link" target="_blank" rel="noopener">Falar no WhatsApp</a>
+      </article>
+    </section>
+  </main>
+
+  <a id="wa-float" class="wa-float support-link hidden" target="_blank" rel="noopener" aria-label="Falar com o suporte no WhatsApp">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-13.5 7.8L3 21l1.2-4.5A9 9 0 1 1 21 12Z"/></svg>
+  </a>
+
+  <dialog id="cancel-dlg">
+    <form method="dialog" class="checkout-step">
+      <h3>Cancelar seu plano?</h3>
+      <p class="muted">Você deixa de ser cobrado a partir de agora. Os pagamentos já feitos ficam no seu histórico. Se mudar de ideia, é só pagar uma nova mensalidade para reativar.</p>
+      <div class="actions-row">
+        <button class="btn btn-ghost" value="no">Manter plano</button>
+        <button class="btn btn-danger" value="yes">Sim, cancelar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- PAGAMENTO (cartão pelo Card Payment Brick do Mercado Pago, ou Pix) -->
+  <dialog id="pay-dlg">
+    <div class="pay-box">
+      <button class="close" id="pay-close" aria-label="Fechar">×</button>
+      <p class="eyebrow">Pagamento</p>
+      <div class="summary"><strong id="pay-plan"></strong><span id="pay-amount"></span></div>
+      <p class="muted small" id="pay-month"></p>
+
+      <div class="tabs" id="pay-tabs" role="tablist">
+        <button type="button" data-method="card" class="active">Cartão</button>
+        <button type="button" data-method="pix">Pix</button>
+      </div>
+
+      <div id="pay-card">
+        <div id="cardPaymentBrick_container"></div>
+        <p class="form-error hidden" id="card-error"></p>
+      </div>
+
+      <div id="pay-pix" class="hidden">
+        <div id="pix-start">
+          <p class="muted">Gere o código e pague pelo app do seu banco. A confirmação é automática.</p>
+          <button class="btn btn-primary btn-lg btn-block" id="pix-btn">Gerar Pix</button>
+        </div>
+        <div id="pix-show" class="hidden">
+          <img id="pix-qr" alt="QR Code do Pix" width="220" height="220">
+          <label>Pix copia e cola<textarea id="pix-code" rows="3" readonly></textarea></label>
+          <button class="btn btn-outline btn-block" id="pix-copy" type="button">Copiar código</button>
+          <p class="pix-wait"><span class="dot"></span> Aguardando pagamento…</p>
+        </div>
+        <p class="form-error hidden" id="pix-error"></p>
+      </div>
+
+      <p class="fine lock">🔒 Pagamento processado pelo Mercado Pago. Os dados do cartão não passam pelo nosso servidor.</p>
+    </div>
+  </dialog>
+
+  <script src="https://sdk.mercadopago.com/js/v2"></script>
+  <script type="module" src="./src/conta.js"></script>
+</body>
+</html>

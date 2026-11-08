@@ -1,0 +1,123 @@
+/* Controles próprios (lista suspensa, seletor de mês e calendário) — usam as cores do tema da página */
+
+.cc-field { position: relative; display: block; min-width: 0; }
+.cc-field.cc-inline { display: inline-block; }
+
+/* elemento original: continua no formulário (valor, required), mas invisível */
+.cc-native {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 0;
+  pointer-events: none;
+  margin: 0;
+}
+
+.cc-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px 8px 12px;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.cc-inline .cc-trigger { width: auto; min-width: 150px; }
+.cc-trigger:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cc-trigger:focus-visible, .cc-trigger.open {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.cc-trigger:disabled { opacity: .6; cursor: default; }
+.cc-trigger svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; }
+.cc-select .cc-trigger.open svg { transform: rotate(180deg); }
+.cc-trigger.open svg { stroke: var(--accent); }
+
+/* todos os textos empilhados na mesma célula: largura = opção mais longa */
+.cc-labels { display: grid; min-width: 0; }
+.cc-labels > span { grid-area: 1 / 1; visibility: hidden; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-labels > span.on { visibility: visible; }
+.cc-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-month .cc-value:first-letter { text-transform: uppercase; }
+.cc-ph { color: var(--muted); }
+
+/* ---------- popover */
+.cc-pop {
+  position: fixed;
+  z-index: 1000;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .06), 0 16px 40px rgba(0, 0, 0, .18);
+  padding: 6px;
+  animation: cc-in .12s ease-out;
+}
+@keyframes cc-in { from { opacity: 0; transform: translateY(-4px); } }
+
+.cc-list { max-height: 300px; overflow-y: auto; display: grid; gap: 2px; }
+.cc-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cc-opt.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.cc-opt.selected { color: var(--accent); font-weight: 600; }
+.cc-opt.disabled { opacity: .45; cursor: default; }
+.cc-opt svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- calendário / mês */
+.cc-cal { width: 296px; padding: 12px; }
+.cc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cc-title { font-weight: 700; font-size: 15px; }
+.cc-title-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; font-weight: 700; color: var(--text);
+  background: none; border: 0; padding: 6px 10px; border-radius: 8px; cursor: pointer;
+}
+.cc-title-btn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.cc-title-btn svg { width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.cc-nav {
+  display: grid; place-items: center;
+  width: 32px; height: 32px; border-radius: 8px;
+  background: none; border: 0; color: var(--text); cursor: pointer;
+}
+.cc-nav:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.cc-nav svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.cc-grid { display: grid; gap: 4px; }
+.cc-grid-4 { grid-template-columns: repeat(4, 1fr); }
+.cc-grid-7 { grid-template-columns: repeat(7, 1fr); }
+.cc-week span { text-align: center; font-size: 12px; font-weight: 600; color: var(--muted); padding: 4px 0; }
+.cc-cell {
+  font: inherit; font-size: 14px; color: var(--text);
+  background: none; border: 1px solid transparent; border-radius: 8px;
+  padding: 10px 0; cursor: pointer; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.cc-day { padding: 7px 0; }
+.cc-empty { cursor: default; }
+.cc-cell:not(.cc-empty):hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.cc-cell.today { border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); font-weight: 600; }
+.cc-cell.selected, .cc-cell.selected:hover { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+
+.cc-foot { display: flex; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.cc-link { font: inherit; font-size: 14px; font-weight: 600; color: var(--accent); background: none; border: 0; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.cc-link:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* Área do assinante: campos maiores, como os outros inputs da página */
+.account .cc-trigger, .pay-box .cc-trigger { padding: 12px 14px; border-radius: 10px; min-height: 46px; }

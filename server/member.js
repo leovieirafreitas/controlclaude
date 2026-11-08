@@ -1,0 +1,327 @@
+// Área do assinante: /api/member/*
+//
+// 1. O cliente cria a conta (nome, e-mail, nascimento, WhatsApp opcional, senha).
+// 2. Logado, escolhe um plano → cria/atualiza a assinatura e vai para o checkout.
+// 3. Na área dele: vê e edita dados, troca senha, vê pagamentos, paga e cancela.
+// Esqueci a senha: código por e-mail (Resend) + nova senha.
+import { Router } from 'express';
+import { all, get, run } from './db.js';
+import { ApiError, h, str, todayISO, getSettings } from './routes.js';
+import { EMAIL_RE, checkCode, issueCode, makeSession, normEmail } from './otp.js';
+import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
+import { notifyCancel, notifySignup } from './whatsapp.js';
+import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber } from './mp.js';
+
+export const memberApi = Router();
+// Versão dos Termos de uso / Política de privacidade (mude junto com a data nas páginas termos.html e privacidade.html)
+const TERMS_VERSION = '2026-11-08';
+export const memberSession = makeSession({ cookie: 'msid', maxAgeMs: 30 * 24 * 3600_000, sameSite: 'lax' });
+
+// ------------------------------------------------------------------ helpers
+
+export function checkBirthDate(v) {
+  const s = str(v);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s))) throw new ApiError(400, 'Informe sua data de nascimento.');
+  const age = (Date.now() - Date.parse(s)) / (365.25 * 86400_000);
+  if (age < 0 || age > 120) throw new ApiError(400, 'Data de nascimento inválida.');
+  return s;
+}
+
+function checkName(v) {
+  const s = str(v);
+  if (s.length < 2 || s.length > 120) throw new ApiError(400, 'Informe seu nome completo.');
+  return s;
+}
+
+function checkPhone(v) {
+  const s = str(v);
+  if (!s) throw new ApiError(400, 'Informe seu WhatsApp com DDD. É por ele que avisamos o vencimento.');
+  if (s.replace(/\D/g, '').length < 10 || s.length > 30) throw new ApiError(400, 'WhatsApp inválido. Use DDD + número.');
+  return s;
+}
+
+function checkNewPassword(pw) {
+  const problem = checkPasswordRules(pw);
+  if (problem) throw new ApiError(400, problem);
+  return String(pw);
+}
+
+const customerByEmail = (email) => get('SELECT * FROM customers WHERE email = ?', [email]);
+const subscriptionOf = (customerId) => get('SELECT * FROM subscribers WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [customerId]);
+
+/** Mês que o assinante deve pagar agora: o atual, ou o próximo se o atual já está quitado. */
+export async function billingMonth(sub, priceCents) {
+  const month = todayISO().slice(0, 7);
+  const { t: paid } = await get('SELECT COALESCE(SUM(amount_cents), 0) AS t FROM payments WHERE subscriber_id = ? AND ref_month = ?', [sub.id, month]);
+  if (paid < priceCents) return month;
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+async function currentCustomer(req) {
+  const email = memberSession.get(req);
+  const c = email && (await customerByEmail(email));
+  if (!c) throw new ApiError(401, 'Não autenticado');
+  return c;
+}
+
+async function requireSubscription(customer) {
+  const sub = await subscriptionOf(customer.id);
+  if (!sub) throw new ApiError(400, 'Você ainda não tem um plano. Escolha um plano para assinar.');
+  return sub;
+}
+
+// Limite de tentativas de login: 5 erros por e-mail e 20 por IP a cada 15 min
+const failures = new Map();
+function tooManyFailures(key, max) {
+  const now = Date.now();
+  const list = (failures.get(key) || []).filter((t) => now - t < 15 * 60_000);
+  failures.set(key, list);
+  return list.length >= max;
+}
+const addFailure = (key) => failures.set(key, [...(failures.get(key) || []), Date.now()]);
+
+// Limite de criação de contas: 5 por IP a cada 10 min
+const signups = new Map();
+function signupLimited(ip) {
+  const now = Date.now();
+  const list = (signups.get(ip) || []).filter((t) => now - t < 10 * 60_000);
+  if (list.length >= 5) return true;
+  list.push(now);
+  signups.set(ip, list);
+  return false;
+}
+
+// Erros do Mercado Pago viram uma mensagem amigável
+const mpSafe = (fn) => async (...args) => {
+  try {
+    return await fn(...args);
+  } catch (err) {
+    if (String(err.message).startsWith('Mercado Pago')) {
+      console.error(err.message);
+      throw new ApiError(502, 'Não foi possível falar com o Mercado Pago. Tente de novo.');
+    }
+    throw err;
+  }
+};
+
+// ------------------------------------------------------------------ conta e login
+
+memberApi.post('/register', h(async (req, res) => {
+  const b = req.body || {};
+  if (str(b.website)) return { ok: true }; // campo-isca contra robôs
+  const name = checkName(b.name);
+  const email = normEmail(b.email);
+  if (!EMAIL_RE.test(email) || email.length > 160) throw new ApiError(400, 'Informe um e-mail válido.');
+  const birth = checkBirthDate(b.birth_date);
+  const phone = checkPhone(b.phone);
+  const password = checkNewPassword(b.password);
+  if (b.accept_terms !== true) throw new ApiError(400, 'Para criar a conta, aceite os Termos de uso e a Política de privacidade.');
+  if (signupLimited(req.ip)) throw new ApiError(429, 'Muitas tentativas. Tente de novo em alguns minutos.');
+
+  const r = await run(`
+    INSERT INTO customers (name, email, phone, birth_date, password_hash, terms_accepted_at, terms_version)
+    VALUES (?, ?, ?, ?, ?, now(), ?) ON CONFLICT (email) DO NOTHING RETURNING id`,
+  [name, email, phone, birth, await hashPassword(password), TERMS_VERSION]);
+  if (!r.rowCount) throw new ApiError(409, 'Este e-mail já tem conta. Entre com sua senha ou use "Esqueci minha senha".');
+  notifySignup({ name, email, phone, birth_date: birth });
+  memberSession.set(req, res, email);
+  return { ok: true };
+}));
+
+memberApi.post('/login', h(async (req, res) => {
+  const email = normEmail(req.body?.email);
+  const ipKey = `ip:${req.ip}`;
+  const emailKey = `email:${email}`;
+  if (tooManyFailures(ipKey, 20) || tooManyFailures(emailKey, 5)) {
+    throw new ApiError(429, 'Muitas tentativas erradas. Aguarde 15 minutos ou use "Esqueci minha senha".');
+  }
+  const c = await customerByEmail(email);
+  const ok = await verifyPassword(req.body?.password, c?.password_hash);
+  if (!c || !ok) {
+    addFailure(ipKey);
+    addFailure(emailKey);
+    throw new ApiError(401, 'E-mail ou senha incorretos.');
+  }
+  failures.delete(emailKey);
+  memberSession.set(req, res, email);
+  return { ok: true };
+}));
+
+memberApi.post('/logout', (req, res) => {
+  memberSession.clear(res);
+  res.json({ ok: true });
+});
+
+// Esqueci a senha: 1) pede código  2) código + nova senha
+memberApi.post('/password/forgot', h(async (req) => {
+  const email = normEmail(req.body?.email);
+  const c = await customerByEmail(email);
+  await issueCode({ scope: 'reset', email, ip: req.ip, allowed: Boolean(c), phone: c?.phone });
+  return { ok: true, message: 'Se este e-mail tiver conta, enviamos um código de 6 dígitos para o WhatsApp cadastrado e para o e-mail. Confira também o spam.' };
+}));
+
+memberApi.post('/password/reset', h(async (req, res) => {
+  const email = normEmail(req.body?.email);
+  const password = checkNewPassword(req.body?.password);
+  const c = await customerByEmail(email);
+  await checkCode({ scope: 'reset', email, code: req.body?.code, allowed: Boolean(c) });
+  await run('UPDATE customers SET password_hash = ? WHERE id = ?', [await hashPassword(password), c.id]);
+  failures.delete(`email:${email}`);
+  memberSession.set(req, res, email);
+  return { ok: true };
+}));
+
+memberApi.put('/password', h(async (req) => {
+  const c = await currentCustomer(req);
+  if (!(await verifyPassword(req.body?.current_password, c.password_hash))) throw new ApiError(400, 'Senha atual incorreta.');
+  const password = checkNewPassword(req.body?.new_password);
+  await run('UPDATE customers SET password_hash = ? WHERE id = ?', [await hashPassword(password), c.id]);
+  return { ok: true };
+}));
+
+// ------------------------------------------------------------------ dados
+
+/**
+ * Monta a tela do assinante com UMA rodada ao banco (4 consultas em paralelo, todas pelo e-mail).
+ * Cada ida ao banco custa ~180 ms, então evitar consultas em fila é o que deixa a tela rápida.
+ */
+async function memberViewByEmail(email) {
+  const month = todayISO().slice(0, 7);
+  const [customer, sub, plans, payments] = await Promise.all([
+    customerByEmail(email),
+    get(`
+      SELECT s.*, p.name AS plan_name, p.price_cents, p.description AS plan_description,
+             (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this_month
+      FROM subscribers s
+      JOIN plans p ON p.id = s.plan_id
+      JOIN customers c ON c.id = s.customer_id
+      WHERE c.email = ? ORDER BY s.id DESC LIMIT 1`, [month, email]),
+    all('SELECT id, name, price_cents, description, features, featured FROM plans WHERE active ORDER BY price_cents'),
+    all(`
+      SELECT pay.ref_month, pay.amount_cents, pay.paid_at, pay.method FROM payments pay
+      WHERE pay.subscriber_id = (
+        SELECT s.id FROM subscribers s JOIN customers c ON c.id = s.customer_id
+        WHERE c.email = ? ORDER BY s.id DESC LIMIT 1)
+      ORDER BY pay.paid_at DESC, pay.id DESC LIMIT 24`, [email]),
+  ]);
+  if (!customer) throw new ApiError(401, 'Não autenticado');
+
+  let subscription = null;
+  if (sub) {
+    let next = month;
+    if (sub.paid_this_month >= sub.price_cents) {
+      const [y, m] = month.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+    subscription = {
+      status: sub.status, start_date: sub.start_date, due_day: sub.due_day,
+      plan: { id: sub.plan_id, name: sub.plan_name, price_cents: sub.price_cents, description: sub.plan_description },
+      next_charge: { month: next, current_paid: next !== month },
+    };
+  }
+  return {
+    customer: { name: customer.name, email: customer.email, phone: customer.phone, birth_date: customer.birth_date, created_at: customer.created_at },
+    subscription,
+    payments: sub ? payments : [],
+    plans,
+    can_pay: mpConfigured,
+    mp_public_key: mpConfigured ? MP_PUBLIC_KEY : null,
+  };
+}
+
+const memberView = (customer) => memberViewByEmail(customer.email);
+
+memberApi.get('/me', h(async (req) => {
+  const email = memberSession.get(req);
+  if (!email) throw new ApiError(401, 'Não autenticado');
+  return memberViewByEmail(email);
+}));
+
+memberApi.put('/me', h(async (req) => {
+  const c = await currentCustomer(req);
+  const name = checkName(req.body?.name);
+  const phone = checkPhone(req.body?.phone);
+  const birth = checkBirthDate(req.body?.birth_date);
+  await Promise.all([
+    run('UPDATE customers SET name = ?, phone = ?, birth_date = ? WHERE id = ?', [name, phone, birth, c.id]),
+    run('UPDATE subscribers SET name = ?, phone = ?, birth_date = ? WHERE customer_id = ?', [name, phone, birth, c.id]),
+  ]);
+  return memberView(c);
+}));
+
+// ------------------------------------------------------------------ assinatura
+
+/** Escolhe um plano: cria a assinatura (ou troca o plano se ainda não estiver ativa). O pagamento vem depois, em /pay. */
+memberApi.post('/subscribe', h(async (req) => {
+  const c = await currentCustomer(req);
+  const plan = await get('SELECT * FROM plans WHERE id = ? AND active', [Number(req.body?.plan_id) || 0]);
+  if (!plan) throw new ApiError(400, 'Plano indisponível. Escolha outro plano.');
+
+  const sub = await subscriptionOf(c.id);
+  if (sub && sub.status === 'ativo' && sub.plan_id !== plan.id) {
+    throw new ApiError(409, 'Você já tem um plano ativo. Para trocar de plano, fale com o suporte.');
+  }
+
+  const today = todayISO();
+  if (!sub) {
+    await run(`
+      INSERT INTO subscribers (customer_id, name, email, phone, birth_date, plan_id, start_date, due_day, status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando', 'Cadastro pela área do assinante')`,
+    [c.id, c.name, c.email, c.phone, c.birth_date, plan.id, today, Math.min(Number(today.slice(8, 10)), 28)]);
+  } else if (sub.plan_id !== plan.id) {
+    await run("UPDATE subscribers SET plan_id = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END WHERE id = ?", [plan.id, sub.id]);
+  }
+
+  const view = await memberView(c);
+  if (!mpConfigured) {
+    const { pix_key, whatsapp } = await getSettings();
+    return { ...view, manual: { pix_key, whatsapp } };
+  }
+  return view;
+}));
+
+/**
+ * Paga a mensalidade em aberto.
+ *   { method: 'card', card: { token, payment_method_id, installments, payer } } → { status, message, view }
+ *   { method: 'pix' } → { pix: { order_id, qr_code, qr_code_base64, ticket_url } }
+ */
+memberApi.post('/pay', h(mpSafe(async (req) => {
+  if (!mpConfigured) throw new ApiError(503, 'Pagamento online indisponível no momento.');
+  const c = await currentCustomer(req);
+  const sub = await requireSubscription(c);
+  const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
+  if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
+  const month = await billingMonth(sub, plan.price_cents);
+
+  if (req.body?.method === 'pix') {
+    return { pix: await payWithPix({ ...sub, email: c.email }, plan, month), amount_cents: plan.price_cents };
+  }
+  const card = req.body?.card || {};
+  if (!card.token || !card.payment_method_id) throw new ApiError(400, 'Dados do cartão incompletos.');
+  const result = await payWithCard({ ...sub, email: c.email }, plan, month, card);
+  return { ...result, view: await memberView(c) };
+})));
+
+memberApi.post('/sync', h(async (req) => {
+  const c = await currentCustomer(req);
+  const sub = await subscriptionOf(c.id);
+  if (sub && mpConfigured) {
+    const orderId = str(req.body?.order_id);
+    if (/^ORD[A-Z0-9]+$/.test(orderId)) await syncOrderId(orderId, sub.id).catch((e) => console.error(e.message));
+    await syncSubscriber(sub.id).catch((e) => console.error(e.message));
+  }
+  return memberView(c);
+}));
+
+memberApi.post('/cancel', h(async (req) => {
+  const c = await currentCustomer(req);
+  const sub = await requireSubscription(c);
+  if (sub.status === 'cancelado') throw new ApiError(400, 'Seu plano já está cancelado.');
+  await run("UPDATE subscribers SET status = 'cancelado', notes = trim(notes || ' · Cancelado pelo assinante em ' || ?::text) WHERE id = ?",
+    [todayISO().split('-').reverse().join('/'), sub.id]);
+  notifyCancel(sub.id).catch((e) => console.error('WhatsApp:', e.message));
+  return memberView(c);
+}));
