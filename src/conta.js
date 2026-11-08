@@ -466,7 +466,7 @@ $('#check-btn').addEventListener('click', async (e) => {
     const data = await call('/sync', { method: 'POST', body: {} });
     render(data);
     const found = data.payments.length > before;
-    flash(found ? 'Pagamento encontrado e registrado!' : 'Ainda não encontramos um pagamento aprovado. Se pagou com Pix ou boleto, pode levar alguns minutos.', found ? 'ok' : 'warn');
+    flash(found ? 'Pagamento encontrado e registrado!' : 'Ainda não encontramos um pagamento aprovado. Se pagou com Pix, pode levar alguns minutos.', found ? 'ok' : 'warn');
   } catch (err) {
     flash(err.message, 'bad');
   } finally {
