@@ -15,11 +15,14 @@ process.on('uncaughtException', (err) => console.error('Exceção não tratada:'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
 const PORT = Number(process.env.PORT || 3000);
-const HOST = process.env.HOST || '127.0.0.1';
+const PROD = process.env.NODE_ENV === 'production';
+// Em produção (VPS/Docker) aceita conexões de fora; no Mac, só do próprio computador
+const HOST = process.env.HOST || (PROD ? '0.0.0.0' : '127.0.0.1');
 
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', 'loopback');
+// Na VPS há um proxy (Easypanel/Traefik) na frente: confia em 1 salto para ler o IP real e o HTTPS
+app.set('trust proxy', process.env.TRUST_PROXY ? (Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY) : (PROD ? 1 : 'loopback'));
 app.use(express.json({ limit: '20kb' }));
 
 app.use('/api/public', publicApi);
@@ -32,13 +35,21 @@ app.use('/api', requireAuth, api);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
 
 // Em produção, o mesmo servidor entrega o front já compilado (npm run build)
+//   /            → página de vendas
+//   /admin       → painel do administrador
+//   /conta, /termos, /privacidade
 if (fs.existsSync(DIST)) {
-  app.use(express.static(DIST));
-  app.get('/assinar', (req, res) => res.sendFile(path.join(DIST, 'assinar.html')));
-  app.get('/conta', (req, res) => res.sendFile(path.join(DIST, 'conta.html')));
-  app.get('/termos', (req, res) => res.sendFile(path.join(DIST, 'termos.html')));
-  app.get('/privacidade', (req, res) => res.sendFile(path.join(DIST, 'privacidade.html')));
-  app.get('/{*path}', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
+  const page = (file) => (req, res) => res.sendFile(path.join(DIST, file));
+  app.use(express.static(DIST, { index: false, maxAge: '7d', setHeaders: (res, file) => {
+    if (file.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+  } }));
+  app.get('/', page('assinar.html'));
+  app.get('/assinar', page('assinar.html'));
+  app.get('/conta', page('conta.html'));
+  app.get('/termos', page('termos.html'));
+  app.get('/privacidade', page('privacidade.html'));
+  app.get(['/admin', '/admin/{*path}'], page('index.html'));
+  app.get('/{*path}', page('assinar.html'));
 }
 
 app.listen(PORT, HOST, () => {
