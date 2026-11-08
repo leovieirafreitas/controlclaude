@@ -65,9 +65,9 @@ export async function issueCode({ scope, email, ip, allowed, phone }) {
   const r = await run('INSERT INTO login_codes (scope, email, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id',
     [scope, email, hmac(`${scope}:${email}:${code}`), now + CODE_TTL_MS, now]);
 
-  // Envia por e-mail e, se o cliente tiver WhatsApp, também por lá. Basta um dos dois funcionar.
-  const channels = [sendLoginCode(email, code, scope)];
-  if (phone) channels.push(sendCodeWhatsapp(phone, code));
+  // Envia por e-mail e também pelo WhatsApp (do cliente, ou do admin no login do painel). Basta um funcionar.
+  const phones = Array.isArray(phone) ? phone : phone ? [phone] : [];
+  const channels = [sendLoginCode(email, code, scope), ...phones.map((p) => sendCodeWhatsapp(p, code, scope))];
   const results = await Promise.allSettled(channels);
   results.filter((x) => x.status === 'rejected').forEach((x) => console.error('Falha ao enviar código:', x.reason?.message));
   if (!results.some((x) => x.status === 'fulfilled')) {
