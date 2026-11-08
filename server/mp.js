@@ -194,3 +194,19 @@ export async function syncSubscriber(subscriberId) {
   }
   return added;
 }
+
+/**
+ * Rede de segurança (funciona mesmo sem webhook): confere no Mercado Pago os pedidos
+ * das últimas 48 h que ainda não viraram pagamento — ex.: cliente pagou o Pix e fechou a página.
+ */
+export async function syncPendingCheckouts() {
+  if (!mpConfigured) return 0;
+  const subs = await all(`
+    SELECT DISTINCT c.subscriber_id FROM checkouts c
+    WHERE c.created_at > now() - interval '48 hours' AND c.preference_id LIKE 'ORD%'
+      AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.notes = 'Mercado Pago ' || c.preference_id)`);
+  let added = 0;
+  for (const { subscriber_id } of subs) added += await syncSubscriber(subscriber_id).catch(() => 0);
+  if (added) console.log(`Mercado Pago: ${added} pagamento(s) encontrado(s) na conferência automática`);
+  return added;
+}

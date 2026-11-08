@@ -7,6 +7,7 @@ import { publicApi } from './public.js';
 import { memberApi } from './member.js';
 import { authProblems, logout, me, requestCode, requireAuth, verifyCode } from './auth.js';
 import { startNoticeScheduler, whatsappConfigured } from './whatsapp.js';
+import { mpConfigured, syncPendingCheckouts } from './mp.js';
 
 // Rede de segurança: um erro inesperado é registrado no log em vez de derrubar o servidor.
 process.on('unhandledRejection', (err) => console.error('Erro não tratado:', err?.message || err));
@@ -56,5 +57,11 @@ app.listen(PORT, HOST, () => {
   if (authProblems.length) console.warn(`AVISO: login do painel desativado (${authProblems.join(', ')}). Configure o arquivo .env.`);
   console.log(`API rodando em http://${HOST}:${PORT}`);
   startNoticeScheduler();
+  // Confere pedidos em aberto no Mercado Pago a cada 5 min (não depende do webhook)
+  if (mpConfigured) {
+    const sync = () => syncPendingCheckouts().catch((e) => console.error('Mercado Pago (conferência):', e.message));
+    setTimeout(sync, 30_000).unref();
+    setInterval(sync, 5 * 60_000).unref();
+  }
   console.log(whatsappConfigured ? 'Avisos no WhatsApp: ligados' : 'Avisos no WhatsApp: desligados (configure EVOLUTION_* no .env)');
 });
