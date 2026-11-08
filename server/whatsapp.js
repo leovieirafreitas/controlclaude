@@ -13,6 +13,7 @@ const CUSTOMER_ON = !/^(off|0|false|nao|não)$/i.test(process.env.WHATSAPP_CUSTO
 const REMINDER_DAYS = Math.max(0, Number(process.env.REMINDER_DAYS_BEFORE ?? 3) || 0);
 
 export const whatsappConfigured = Boolean(URL && INSTANCE && TOKEN && NUMBERS.length);
+export const ADMIN_WHATSAPP_NUMBERS = NUMBERS;
 const canSend = Boolean(URL && INSTANCE && TOKEN);
 
 const brl = (cents) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -59,15 +60,15 @@ export async function notifyCustomer(phone, text) {
   return number ? send(number, text) : false;
 }
 
-/** Código de recuperação de senha pelo WhatsApp do cliente. Lança erro se não conseguir enviar. */
-export async function sendCodeWhatsapp(phone, code) {
+/** Código de segurança pelo WhatsApp (recuperar senha do cliente ou entrar no painel). Lança erro se não enviar. */
+export async function sendCodeWhatsapp(phone, code, purpose = 'reset') {
   if (!canSend) throw new Error('WhatsApp não configurado');
   const number = toWhatsNumber(phone);
   if (!number) throw new Error('cliente sem WhatsApp válido');
   const ok = await send(number, [
     '🔐 *Control Claude*',
     '',
-    `Seu código para criar uma nova senha é: *${code}*`,
+    purpose === 'admin' ? `Seu código para entrar no *painel admin* é: *${code}*` : `Seu código para criar uma nova senha é: *${code}*`,
     '',
     'Ele vale por 10 minutos e só pode ser usado uma vez.',
     'Se não foi você que pediu, ignore esta mensagem. Ninguém da nossa equipe vai pedir este código.',
