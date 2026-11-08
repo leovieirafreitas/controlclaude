@@ -20,7 +20,7 @@ function render() {
       <td>${esc(s.plan_name)} <span class="muted">· ${brl(s.price_cents)}</span></td>
       <td>${fmtDate(s.start_date)}</td>
       <td>dia ${s.due_day}</td>
-      <td>${badge(s.status)}</td>
+      <td>${badge(s.status)}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
       <td>
         ${s.status === 'aguardando' ? `<button class="btn small primary" data-activate="${s.id}">Ativar</button>` : ''}
         <button class="btn small" data-edit="${s.id}">Editar</button>

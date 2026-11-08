@@ -64,7 +64,7 @@ function renderRows() {
       <td class="num">${brl(s.price_cents)}</td>
       <td>${String(s.due_day).padStart(2, '0')}/${month}</td>
       <td class="num">${s.paid_cents ? `${brl(s.paid_cents)}<div class="muted">${fmtDate(s.last_paid_at)} · ${(s.paid_methods || '').split(',').map((m) => METHOD_LABEL[m] || m).join(' + ')}</div>` : '—'}</td>
-      <td>${badge(s.pay_status)}</td>
+      <td>${badge(s.pay_status)}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
       <td>${s.pay_status !== 'pago' ? `<button class="btn small primary" data-quickpay="${s.id}">Marcar pago</button>` : ''}</td>
     </tr>`).join('')
     || `<tr><td colspan="7" class="empty">Nenhum assinante ${filter ? 'com este status' : 'ativo neste mês'}.</td></tr>`;

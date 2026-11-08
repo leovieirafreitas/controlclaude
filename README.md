@@ -100,7 +100,10 @@ Configure no `.env`: `EVOLUTION_URL`, `EVOLUTION_INSTANCE`, `EVOLUTION_TOKEN` (t
 | Escolheu o plano e não pagou: 24 horas depois | último lembrete ao cliente + admin |
 | 1º pagamento (nova assinatura) | admin + boas-vindas ao cliente |
 | Pagamentos seguintes | admin + confirmação ao cliente |
-| Cliente cancela | admin |
+| Cliente cancela (com período pago) | admin: "acesso até dd/mm"; o plano continua ativo até lá |
+| `RETENTION_DAYS_BEFORE` dias antes do fim do acesso (padrão 3) | cliente: "quer continuar? responda SIM ou NÃO" |
+| Cliente responde SIM / NÃO no WhatsApp | cliente + admin (SIM desfaz o cancelamento) |
+| Último dia de acesso | plano vira Cancelado + admin: "desative este cliente" |
 | `REMINDER_DAYS_BEFORE` dias antes do vencimento (padrão 3) | lembrete ao cliente |
 | 1 dia antes do vencimento, sem pagamento | admin |
 | Dia seguinte ao vencimento sem pagamento | cliente + admin |
@@ -116,3 +119,9 @@ Construção → **Dockerfile**; porta do domínio **3000**. Variáveis de ambie
 com `APP_URL=https://seu-dominio` e `NODE_ENV=production`.
 
 Rotas em produção: `/` página de vendas · `/admin` painel · `/conta` área do assinante · `/termos` · `/privacidade`.
+
+### Cancelamento agendado e respostas no WhatsApp
+
+Quem cancela continua usando até o fim do período pago (`subscribers.cancel_at`) e não recebe mais cobrança.
+Para ler as respostas SIM/NÃO, o servidor configura sozinho o webhook da Evolution (evento MESSAGES_UPSERT)
+quando `APP_URL` começa com `https://` — por isso só funciona no servidor publicado, não no localhost.

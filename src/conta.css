@@ -160,3 +160,8 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 .check { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.45; cursor: pointer; }
 .check input { width: 18px !important; height: 18px; min-height: 0 !important; margin: 1px 0 0; padding: 0 !important; flex: none; accent-color: var(--accent); cursor: pointer; }
 .check a, .fine a { color: var(--accent); }
+
+/* cancelamento agendado */
+.keep-box { display: grid; gap: 10px; margin-top: 6px; padding: 14px 16px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); }
+.keep-box p { margin: 0; }
+.keep-box .btn { justify-self: start; }

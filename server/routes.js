@@ -146,6 +146,9 @@ api.put('/subscribers/:id', h(async ({ body, params }) => {
   await run(`
     UPDATE subscribers SET name = ?, email = ?, phone = ?, plan_id = ?, start_date = ?, due_day = ?, status = ?, notes = ?, birth_date = ?
     WHERE id = ?`, [...(await subscriberValues(body)), Number(params.id)]);
+  // Admin mudou o status na mão: um cancelamento agendado antigo deixa de valer
+  await run(`UPDATE subscribers SET cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL
+             WHERE id = ? AND cancel_at IS NOT NULL AND (status <> 'ativo' OR cancel_at <= current_date)`, [Number(params.id)]);
   return { ok: true };
 }));
 
@@ -209,7 +212,7 @@ api.get('/dashboard', h(async ({ query }) => {
 
   // Todas as consultas do painel em paralelo (cada ida ao banco custa ~180 ms)
   const [subs, totals, byMethod, byPlan] = await Promise.all([all(`
-    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.status, s.start_date,
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.status, s.start_date, s.cancel_at, s.retention_answer,
            p.name AS plan_name, p.price_cents,
            COALESCE((SELECT SUM(amount_cents) FROM payments WHERE subscriber_id = s.id AND ref_month = ?), 0) AS paid_cents,
            (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS last_paid_at,

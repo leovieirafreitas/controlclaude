@@ -129,3 +129,8 @@ alter table public.notifications_sent enable row level security;  -- sem políti
 -- v6: aceite dos Termos de uso e da Política de privacidade no cadastro (prova do consentimento)
 alter table public.customers add column if not exists terms_accepted_at timestamptz;
 alter table public.customers add column if not exists terms_version text;
+
+-- v7: cancelamento agendado (cliente usa até o fim do período pago) e resposta à pergunta de retenção
+alter table public.subscribers add column if not exists cancel_at date;               -- último dia de acesso
+alter table public.subscribers add column if not exists cancel_requested_at timestamptz;
+alter table public.subscribers add column if not exists retention_answer text;        -- sim | nao (resposta no WhatsApp)

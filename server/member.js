@@ -9,7 +9,7 @@ import { all, get, run } from './db.js';
 import { ApiError, h, str, todayISO, getSettings } from './routes.js';
 import { EMAIL_RE, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
-import { notifyCancel, notifySignup } from './whatsapp.js';
+import { notifyCancel, notifyKeep, notifySignup } from './whatsapp.js';
 import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber } from './mp.js';
 
 export const memberApi = Router();
@@ -217,7 +217,7 @@ async function memberViewByEmail(email) {
       next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     }
     subscription = {
-      status: sub.status, start_date: sub.start_date, due_day: sub.due_day,
+      status: sub.status, start_date: sub.start_date, due_day: sub.due_day, cancel_at: sub.cancel_at || null,
       plan: { id: sub.plan_id, name: sub.plan_name, price_cents: sub.price_cents, description: sub.plan_description },
       next_charge: { month: next, current_paid: next !== month },
     };
@@ -316,12 +316,51 @@ memberApi.post('/sync', h(async (req) => {
   return memberView(c);
 }));
 
+/**
+ * Último dia de acesso já pago: o próximo vencimento depois do último mês quitado.
+ * Ex.: pagou 11/2026 com vencimento dia 8 → acesso até 08/12/2026. Retorna null se não há período pago à frente.
+ */
+async function paidAccessUntil(sub) {
+  const row = await get(`
+    SELECT MAX(ref_month) AS m FROM (
+      SELECT pay.ref_month FROM payments pay JOIN subscribers s ON s.id = pay.subscriber_id JOIN plans p ON p.id = s.plan_id
+      WHERE pay.subscriber_id = ? GROUP BY pay.ref_month, p.price_cents HAVING SUM(pay.amount_cents) >= p.price_cents
+    ) t`, [sub.id]);
+  if (!row?.m) return null;
+  const [y, m] = row.m.split('-').map(Number);
+  const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
+  const until = `${next}-${String(sub.due_day).padStart(2, '0')}`;
+  return until > todayISO() ? until : null;
+}
+
+/** Cancelar: se há período pago, o cliente continua usando até o fim dele (cancelamento agendado). */
 memberApi.post('/cancel', h(async (req) => {
   const c = await currentCustomer(req);
   const sub = await requireSubscription(c);
   if (sub.status === 'cancelado') throw new ApiError(400, 'Seu plano já está cancelado.');
-  await run("UPDATE subscribers SET status = 'cancelado', notes = trim(notes || ' · Cancelado pelo assinante em ' || ?::text) WHERE id = ?",
-    [todayISO().split('-').reverse().join('/'), sub.id]);
-  notifyCancel(sub.id).catch((e) => console.error('WhatsApp:', e.message));
+  if (sub.cancel_at) throw new ApiError(400, 'O cancelamento do seu plano já está agendado.');
+  const today = todayISO().split('-').reverse().join('/');
+  const until = sub.status === 'ativo' ? await paidAccessUntil(sub) : null;
+  if (until) {
+    await run(`UPDATE subscribers SET cancel_at = ?, cancel_requested_at = now(), retention_answer = NULL,
+               notes = trim(notes || ' · Pediu cancelamento em ' || ?::text || ' (acesso até ' || ?::text || ')') WHERE id = ?`,
+    [until, today, until.split('-').reverse().join('/'), sub.id]);
+  } else {
+    await run("UPDATE subscribers SET status = 'cancelado', notes = trim(notes || ' · Cancelado pelo assinante em ' || ?::text) WHERE id = ?",
+      [today, sub.id]);
+  }
+  notifyCancel(sub.id, until).catch((e) => console.error('WhatsApp:', e.message));
+  return memberView(c);
+}));
+
+/** Desistir do cancelamento agendado (antes do fim do acesso): o plano continua, sem pagar nada agora. */
+memberApi.post('/keep', h(async (req) => {
+  const c = await currentCustomer(req);
+  const sub = await requireSubscription(c);
+  if (!sub.cancel_at || sub.status !== 'ativo') throw new ApiError(400, 'Não há cancelamento agendado.');
+  await run(`UPDATE subscribers SET cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL,
+             notes = trim(notes || ' · Desistiu do cancelamento em ' || ?::text) WHERE id = ?`,
+  [todayISO().split('-').reverse().join('/'), sub.id]);
+  notifyKeep(sub.id).catch((e) => console.error('WhatsApp:', e.message));
   return memberView(c);
 }));
