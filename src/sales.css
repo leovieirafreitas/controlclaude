@@ -100,7 +100,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .nav-links a:hover { color: var(--text); }
 .nav-links .btn-nav { color: var(--accent-text); background: var(--accent); padding: 8px 14px; border-radius: 8px; font-weight: 600; }
 .nav-links .btn-nav:hover { background: var(--accent-hover); color: var(--accent-text); }
-@media (max-width: 600px) { .nav-links a:not(.btn-nav) { display: none; } }
+@media (max-width: 600px) { .nav-links a:not(.btn-nav), .nav-links a[href="#planos"] { display: none; } }
 
 /* ---------- hero */
 .hero { padding: 88px 0 72px; text-align: center; }
