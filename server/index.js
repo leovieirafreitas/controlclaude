@@ -3,10 +3,10 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { api } from './routes.js';
-import { publicApi } from './public.js';
+import { publicApi, WA_WEBHOOK_PATH } from './public.js';
 import { memberApi } from './member.js';
 import { authProblems, logout, me, requestCode, requireAuth, verifyCode } from './auth.js';
-import { startNoticeScheduler, whatsappConfigured } from './whatsapp.js';
+import { ensureIncomingWebhook, startNoticeScheduler, whatsappConfigured } from './whatsapp.js';
 import { mpConfigured, syncPendingCheckouts } from './mp.js';
 
 // Rede de segurança: um erro inesperado é registrado no log em vez de derrubar o servidor.
@@ -57,6 +57,11 @@ app.listen(PORT, HOST, () => {
   if (authProblems.length) console.warn(`AVISO: login do painel desativado (${authProblems.join(', ')}). Configure o arquivo .env.`);
   console.log(`API rodando em http://${HOST}:${PORT}`);
   startNoticeScheduler();
+  // Em produção (APP_URL com https), a Evolution passa a avisar as mensagens recebidas (respostas SIM/NÃO)
+  const appUrl = (process.env.APP_URL || '').replace(/\/$/, '');
+  if (appUrl.startsWith('https://')) {
+    ensureIncomingWebhook(`${appUrl}/api/public${WA_WEBHOOK_PATH}`).catch((e) => console.error('WhatsApp (webhook):', e.message));
+  }
   // Confere pedidos em aberto no Mercado Pago a cada 5 min (não depende do webhook)
   if (mpConfigured) {
     const sync = () => syncPendingCheckouts().catch((e) => console.error('Mercado Pago (conferência):', e.message));

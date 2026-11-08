@@ -1,6 +1,8 @@
 // Rotas públicas (sem login) usadas pela página de vendas /assinar.
 // O cadastro e a compra acontecem na área do assinante (/api/member), com conta e senha.
 import { Router } from 'express';
+import { hmac } from './otp.js';
+import { handleIncomingMessage } from './whatsapp.js';
 import { all } from './db.js';
 import { h, getSettings } from './routes.js';
 import { mpConfigured, syncOrderId } from './mp.js';
@@ -24,5 +26,35 @@ publicApi.post('/mp-webhook', async (req, res) => {
   res.sendStatus(200);
   if (type === 'order' && /^ORD[A-Z0-9]+$/.test(id)) {
     syncOrderId(id).catch((e) => console.error('Webhook MP:', e.message));
+  }
+});
+
+// Mensagens recebidas no WhatsApp (webhook da Evolution API) — usadas para ler as respostas SIM / NÃO
+// do cliente que cancelou. O caminho tem um segredo derivado do SESSION_SECRET.
+export const WA_WEBHOOK_PATH = `/wa-webhook/${hmac('evolution-webhook').slice(0, 32)}`;
+
+function incomingFrom(body) {
+  const d = body?.data || {};
+  const key = d.key || {};
+  if (key.fromMe) return null;
+  const jids = [key.remoteJid, key.remoteJidAlt, key.senderPn, d.sender, key.participant].filter(Boolean).map(String);
+  if (jids.some((j) => j.endsWith('@g.us'))) return null; // grupos
+  const jid = jids.find((j) => j.endsWith('@s.whatsapp.net'));
+  const text = d.message?.conversation || d.message?.extendedTextMessage?.text
+    || d.message?.buttonsResponseMessage?.selectedDisplayText || d.message?.listResponseMessage?.title || '';
+  return jid && text ? { number: jid.split('@')[0], text } : null;
+}
+
+publicApi.post(WA_WEBHOOK_PATH, async (req, res) => {
+  res.sendStatus(200);
+  const ev = String(req.body?.event || '').toLowerCase().replace(/_/g, '.');
+  if (ev !== 'messages.upsert') return;
+  const msg = incomingFrom(req.body);
+  if (!msg) return;
+  try {
+    const r = await handleIncomingMessage(msg.number, msg.text);
+    if (r !== 'ignorado') console.log(`WhatsApp: resposta de ${msg.number} → ${r}`);
+  } catch (err) {
+    console.error('WhatsApp (resposta):', err.message);
   }
 });

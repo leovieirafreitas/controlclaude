@@ -250,19 +250,23 @@ function render(data) {
     const cancelled = sub.status === 'cancelado';
     const active = sub.status === 'ativo';
     const next = sub.next_charge;
-    $('#status').textContent = STATUS[sub.status] || sub.status;
-    $('#status').className = `status st-${sub.status}`;
+    $('#status').textContent = sub.status === 'ativo' && sub.cancel_at ? `Ativo até ${fmtDate(sub.cancel_at)}` : STATUS[sub.status] || sub.status;
+    $('#status').className = `status st-${sub.status === 'ativo' && sub.cancel_at ? 'aguardando' : sub.status}`;
     $('#plan-name').textContent = sub.plan.name;
     $('#plan-price').textContent = `${brl(sub.plan.price_cents)} por mês`;
     $('#since').textContent = fmtDate(sub.start_date);
     $('#due').textContent = `Todo dia ${sub.due_day}`;
-    $('#cancel-btn').classList.toggle('hidden', cancelled);
+    const scheduled = active && Boolean(sub.cancel_at);
+    $('#cancel-btn').classList.toggle('hidden', cancelled || scheduled);
+    $('#keep-box').classList.toggle('hidden', !scheduled);
+    if (scheduled) $('#keep-text').innerHTML = `Você pediu o cancelamento. Seu plano continua ativo até <strong>${fmtDate(sub.cancel_at)}</strong> e depois será encerrado. Mudou de ideia?`;
     $('#change-btn').classList.toggle('hidden', active);
-    $('#pay-btn').classList.toggle('hidden', !can_pay);
-    $('#check-btn').classList.toggle('hidden', !can_pay || (active && next.current_paid));
+    $('#pay-btn').classList.toggle('hidden', !can_pay || scheduled);
+    $('#check-btn').classList.toggle('hidden', !can_pay || scheduled || (active && next.current_paid));
     $('#pay-btn').textContent = cancelled ? 'Reativar plano' : next.current_paid ? `Adiantar ${fmtMonth(next.month)}` : `Pagar ${fmtMonth(next.month)}`;
     $('#charge-info').textContent = cancelled
       ? 'Seu plano está cancelado. Você não será mais cobrado.'
+      : scheduled ? 'Cancelamento agendado: você não será mais cobrado.'
       : next.current_paid
         ? 'Sua mensalidade deste mês está paga. Obrigado!'
         : `Mensalidade de ${fmtMonth(next.month)} em aberto.`;
@@ -507,12 +511,29 @@ $('#password-form').addEventListener('submit', (e) => {
   });
 });
 
+$('#keep-btn').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    render(await call('/keep', { method: 'POST', body: {} }));
+    flash('Pronto! Seu plano continua ativo. 🎉', 'ok');
+  } catch (err) {
+    flash(err.message, 'bad');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 $('#cancel-btn').addEventListener('click', () => $('#cancel-dlg').showModal());
 $('#cancel-dlg').addEventListener('close', async () => {
   if ($('#cancel-dlg').returnValue !== 'yes') return;
   try {
-    render(await call('/cancel', { method: 'POST' }));
-    flash('Seu plano foi cancelado. Você não será mais cobrado.', 'warn');
+    const data = await call('/cancel', { method: 'POST' });
+    render(data);
+    const until = data.subscription?.cancel_at;
+    flash(until
+      ? `Cancelamento agendado. Você continua usando até ${fmtDate(until)} e não será mais cobrado.`
+      : 'Seu plano foi cancelado. Você não será mais cobrado.', 'warn');
   } catch (err) {
     flash(err.message, 'bad');
   }

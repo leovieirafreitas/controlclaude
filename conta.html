@@ -122,6 +122,10 @@
             <button class="link" id="change-btn">Escolher outro plano</button>
             <button class="link danger" id="cancel-btn">Cancelar plano</button>
           </div>
+          <div class="keep-box hidden" id="keep-box">
+            <p id="keep-text"></p>
+            <button class="btn btn-primary" id="keep-btn">Manter meu plano</button>
+          </div>
         </article>
 
         <article class="card">
@@ -176,7 +180,7 @@
   <dialog id="cancel-dlg">
     <form method="dialog" class="checkout-step">
       <h3>Cancelar seu plano?</h3>
-      <p class="muted">Você deixa de ser cobrado a partir de agora. Os pagamentos já feitos ficam no seu histórico. Se mudar de ideia, é só pagar uma nova mensalidade para reativar.</p>
+      <p class="muted">Você continua usando até o fim do período que já pagou e não será mais cobrado. Até lá, se mudar de ideia, é só clicar em “Manter meu plano”.</p>
       <div class="actions-row">
         <button class="btn btn-ghost" value="no">Manter plano</button>
         <button class="btn btn-danger" value="yes">Sim, cancelar</button>

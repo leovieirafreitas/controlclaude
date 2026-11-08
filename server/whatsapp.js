@@ -11,6 +11,8 @@ const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 // Mensagens para o cliente (boas-vindas, lembrete, atraso). Desligue com WHATSAPP_CUSTOMER_MESSAGES=off
 const CUSTOMER_ON = !/^(off|0|false|nao|não)$/i.test(process.env.WHATSAPP_CUSTOMER_MESSAGES || 'on');
 const REMINDER_DAYS = Math.max(0, Number(process.env.REMINDER_DAYS_BEFORE ?? 3) || 0);
+// Quantos dias antes do fim do acesso perguntar se o cliente quer continuar
+const RETENTION_DAYS = Math.max(1, Number(process.env.RETENTION_DAYS_BEFORE ?? 3) || 3);
 
 export const whatsappConfigured = Boolean(URL && INSTANCE && TOKEN && NUMBERS.length);
 export const ADMIN_WHATSAPP_NUMBERS = NUMBERS;
@@ -54,8 +56,8 @@ export async function notifyAdmin(text) {
 }
 
 /** Envia um texto para o cliente (se ele informou WhatsApp). Retorna true se enviou. */
-export async function notifyCustomer(phone, text) {
-  if (!canSend || !CUSTOMER_ON) return false;
+export async function notifyCustomer(phone, text, { force = false } = {}) {
+  if (!canSend || (!CUSTOMER_ON && !force)) return false;
   const number = toWhatsNumber(phone);
   return number ? send(number, text) : false;
 }
@@ -139,8 +141,8 @@ export async function notifyPayment({ subscriberId, month, amountCents, method, 
     ].join('\n')));
 }
 
-/** Cliente cancelou pela Área do assinante. */
-export async function notifyCancel(subscriberId) {
+/** Cliente cancelou pela Área do assinante. `accessUntil` = último dia de acesso (null = acabou na hora). */
+export async function notifyCancel(subscriberId, accessUntil = null) {
   if (!whatsappConfigured) return;
   const s = await subscriberInfo(subscriberId).catch(() => null);
   if (!s) return;
@@ -151,7 +153,25 @@ export async function notifyCancel(subscriberId) {
     `📦 *Plano:* ${s.plan_name} (${brl(s.price_cents)}/mês)`,
     `📅 Assinante desde ${fmtDate(s.start_date)}`,
     '',
+    accessUntil
+      ? `🔓 *Acesso pago até ${fmtDate(accessUntil)}.* Ele continua usando até lá.\n_Uns dias antes eu pergunto se ele quer continuar, e no dia ${fmtDate(accessUntil)} te aviso para desativar._`
+      : '⛔ *Não tinha período pago em aberto: o acesso terminou agora.* Desative ele do seu sistema.',
+    '',
     `🕒 ${nowBR()}`,
+  ].join('\n')));
+}
+
+/** Cliente desistiu do cancelamento pelo site. */
+export async function notifyKeep(subscriberId) {
+  if (!whatsappConfigured) return;
+  const s = await subscriberInfo(subscriberId).catch(() => null);
+  if (!s) return;
+  fire(notifyAdmin([
+    '✅ *Cliente desistiu do cancelamento*',
+    '',
+    ...contactLines(s),
+    `📦 *Plano:* ${s.plan_name} (${brl(s.price_cents)}/mês)`,
+    'Clicou em "Manter meu plano" na área do assinante. O plano segue normal.',
   ].join('\n')));
 }
 
@@ -210,7 +230,9 @@ export async function runDailyNotices() {
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_next
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
-    WHERE s.status = 'ativo' AND p.price_cents > 0`, [thisMonth, nextMonth]);
+    WHERE s.status = 'ativo' AND p.price_cents > 0 AND s.cancel_at IS NULL`, [thisMonth, nextMonth]);
+
+  await runCancellations(today);
 
   for (const s of subs) {
     for (const [month, paid] of [[thisMonth, s.paid_this], [nextMonth, s.paid_next]]) {
@@ -222,6 +244,138 @@ export async function runDailyNotices() {
       await noticesFor(s, month, daysLeft, due);
     }
   }
+}
+
+// ------------------------------------------------------------------ cancelamento agendado
+
+/**
+ * Assinantes que cancelaram mas ainda têm período pago (cancel_at = último dia de acesso):
+ *  - RETENTION_DAYS dias antes: pergunta ao cliente se quer continuar (ele responde SIM ou NÃO no WhatsApp);
+ *  - no dia cancel_at: o plano vira "cancelado" e o admin recebe o aviso para desativar.
+ */
+async function runCancellations(today) {
+  const list = await all(`
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, s.retention_answer, p.name AS plan_name, p.price_cents
+    FROM subscribers s JOIN plans p ON p.id = s.plan_id
+    WHERE s.status = 'ativo' AND s.cancel_at IS NOT NULL`);
+  for (const s of list) {
+    const daysLeft = daysBetween(today, String(s.cancel_at));
+    const until = fmtDate(s.cancel_at);
+
+    if (daysLeft <= 0) {
+      await run("UPDATE subscribers SET status = 'cancelado' WHERE id = ? AND status = 'ativo'", [s.id]);
+      if (whatsappConfigured && (await claim('fim_acesso', s.id, String(s.cancel_at)))) {
+        await notifyAdmin([
+          '⛔ *Fim do acesso — desative este cliente*',
+          '',
+          ...contactLines(s),
+          `📦 *Plano:* ${s.plan_name} (${brl(s.price_cents)}/mês)`,
+          `📅 *Último dia pago:* ${until}`,
+          '',
+          s.retention_answer === 'nao' ? '_Ele confirmou no WhatsApp que não vai continuar._'
+            : '_Ele não respondeu se queria continuar._',
+          'O plano foi marcado como *Cancelado* no painel.',
+        ].join('\n'));
+      }
+      continue;
+    }
+
+    if (daysLeft <= RETENTION_DAYS && !s.retention_answer && s.phone && canSend && (await claim('retencao', s.id, String(s.cancel_at)))) {
+      const ok = await notifyCustomer(s.phone, [
+        `Oi, ${firstName(s.name)}! 👋`,
+        '',
+        `Você cancelou o plano *${s.plan_name}*, e seu acesso vai até *${until}*.`,
+        '',
+        '*Você quer continuar usando?*',
+        'Responda esta mensagem com:',
+        '👉 *SIM* — para continuar',
+        '👉 *NÃO* — para encerrar no dia ' + until,
+      ].join('\n'), { force: true });
+      if (!ok) await unclaim('retencao', s.id, String(s.cancel_at));
+    }
+  }
+}
+
+/** Telefone → chave para comparar (DDD + 8 últimos dígitos), ignorando 55 e o 9 extra. */
+const phoneKey = (v) => {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2);
+  return d.length >= 10 ? d.slice(0, 2) + d.slice(-8) : '';
+};
+
+/**
+ * Mensagem recebida no WhatsApp (webhook da Evolution). Se for a resposta de um cliente
+ * com cancelamento agendado que recebeu a pergunta, trata SIM / NÃO. Retorna o que fez.
+ */
+export async function handleIncomingMessage(fromNumber, text) {
+  const key = phoneKey(fromNumber);
+  const answer = String(text || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!key || !answer) return 'ignorado';
+  const yes = /^(sim|s|quero|quero continuar|vou continuar|continuar|continuo|claro|com certeza)\b/.test(answer);
+  const no = /^(nao|n|nao quero|encerrar|cancelar|nao vou)\b/.test(answer);
+  if (!yes && !no) return 'ignorado';
+
+  const candidates = await all(`
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, p.name AS plan_name, p.price_cents
+    FROM subscribers s JOIN plans p ON p.id = s.plan_id
+    WHERE s.status = 'ativo' AND s.cancel_at IS NOT NULL AND s.retention_answer IS NULL
+      AND EXISTS (SELECT 1 FROM notifications_sent n WHERE n.kind = 'retencao' AND n.subscriber_id = s.id)`);
+  const s = candidates.find((c) => phoneKey(c.phone) === key);
+  if (!s) return 'ignorado';
+  const until = fmtDate(s.cancel_at);
+
+  if (yes) {
+    await run(`UPDATE subscribers SET cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL,
+               notes = trim(notes || ' · Desistiu do cancelamento pelo WhatsApp em ' || ?::text) WHERE id = ?`,
+    [fmtDate(new Date().toLocaleDateString('sv-SE', { timeZone: TZ })), s.id]);
+    // a próxima mensalidade vence no último dia de acesso: o lembrete já vai nesta resposta
+    const month = String(s.cancel_at).slice(0, 7);
+    await claim('lembrete', s.id, month);
+    await notifyCustomer(s.phone, [
+      `Que ótimo, ${firstName(s.name)}! 🎉 Seu plano *${s.plan_name}* continua.`,
+      '',
+      `A próxima mensalidade (${brl(s.price_cents)}) vence em *${until}*.`,
+      accountLink() ? `Você pode pagar por Pix ou cartão aqui:\n👉 ${accountLink()}` : null,
+    ].filter((l) => l !== null).join('\n'), { force: true });
+    if (whatsappConfigured) {
+      await notifyAdmin([
+        '✅ *Cliente desistiu do cancelamento*',
+        '',
+        ...contactLines(s),
+        `📦 *Plano:* ${s.plan_name} (${brl(s.price_cents)}/mês)`,
+        `Respondeu *SIM* no WhatsApp. Próximo vencimento: ${until}.`,
+      ].join('\n'));
+    }
+    return 'continuou';
+  }
+
+  await run('UPDATE subscribers SET retention_answer = ? WHERE id = ?', ['nao', s.id]);
+  await notifyCustomer(s.phone, [
+    `Tudo bem, ${firstName(s.name)}. Seu acesso continua até *${until}* e depois o plano será encerrado.`,
+    '',
+    'Obrigado por ter sido nosso assinante! Se quiser voltar, é só assinar de novo pelo site. 💛',
+  ].join('\n'), { force: true });
+  if (whatsappConfigured) {
+    await notifyAdmin([
+      '❌ *Cliente confirmou que NÃO vai continuar*',
+      '',
+      ...contactLines(s),
+      `📦 *Plano:* ${s.plan_name} (${brl(s.price_cents)}/mês)`,
+      `🔓 Acesso até *${until}*. No dia eu te aviso para desativar.`,
+    ].join('\n'));
+  }
+  return 'confirmou_nao';
+}
+
+/** Faz a Evolution avisar o servidor das mensagens recebidas (para ler as respostas SIM/NÃO). */
+export async function ensureIncomingWebhook(url) {
+  if (!canSend || !url) return;
+  const current = await evo(`/webhook/find/${encodeURIComponent(INSTANCE)}`).catch(() => null);
+  if (current?.enabled && current?.url === url) return;
+  await evoPost(`/webhook/set/${encodeURIComponent(INSTANCE)}`, {
+    webhook: { enabled: true, url, byEvents: false, base64: false, events: ['MESSAGES_UPSERT'] },
+  });
+  console.log('WhatsApp: webhook de mensagens recebidas configurado');
 }
 
 async function noticesFor(s, month, daysLeft, due) {
@@ -372,6 +526,17 @@ async function evo(path, method = 'GET') {
     const msg = data?.response?.message || data?.message || data?.error || `erro ${res.status}`;
     throw new Error(`Evolution API: ${Array.isArray(msg) ? msg.join(' ') : msg}`);
   }
+  return data;
+}
+
+async function evoPost(path, body) {
+  if (!canSend) throw new Error('WhatsApp não configurado');
+  const res = await fetch(`${URL}${path}`, {
+    method: 'POST', headers: { apikey: TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(20_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Evolution API ${res.status}: ${JSON.stringify(data).slice(0, 200)}`);
   return data;
 }
 
