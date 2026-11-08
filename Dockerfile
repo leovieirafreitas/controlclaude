@@ -15,5 +15,6 @@ COPY server ./server
 COPY --from=build /app/dist ./dist
 USER node
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- http://127.0.0.1:3000/api/public/info >/dev/null || exit 1
+# Usa a porta que a plataforma definir (o Easypanel costuma usar PORT=80)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/public/info" >/dev/null || exit 1
 CMD ["node", "server/index.js"]
