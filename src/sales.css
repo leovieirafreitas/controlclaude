@@ -354,3 +354,6 @@ dialog::backdrop { background: rgba(20, 16, 10, .5); backdrop-filter: blur(2px);
 .legal-links { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--muted); }
 .footer a { color: inherit; }
 @media (max-width: 560px) { .legal-table td:first-child { white-space: normal; } }
+details p + p { margin-top: -8px; }
+details p strong { color: var(--text); }
+details p.small { font-size: 14px; }
