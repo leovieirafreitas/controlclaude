@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control Claude</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="./src/style.css">
+  <link rel="stylesheet" href="./src/controls.css">
+</head>
+<body>
+  <!-- LOGIN -->
+  <div id="login-screen" class="login hidden">
+    <form id="login-form" class="login-card" novalidate>
+      <div class="logo logo-lg"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></div>
+      <p class="muted login-hint">Entre com seu e-mail. Enviaremos um código de acesso.</p>
+      <label>E-mail<input name="email" type="email" autocomplete="email" required autofocus></label>
+      <p id="login-error" class="error hidden"></p>
+      <button class="btn primary" id="login-send">Enviar código</button>
+    </form>
+    <form id="code-form" class="login-card hidden" novalidate>
+      <div class="logo logo-lg"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></div>
+      <h2 class="login-title">Digite o código</h2>
+      <p class="muted login-hint" id="code-hint"></p>
+      <label>Código de 6 dígitos<input name="code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" required></label>
+      <p id="code-error" class="error hidden"></p>
+      <button class="btn primary" id="code-verify">Entrar</button>
+      <div class="login-links">
+        <button type="button" class="link" id="code-back">Trocar e-mail</button>
+        <button type="button" class="link" id="code-resend">Reenviar código</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- APP -->
+  <div id="app" class="hidden">
+    <header class="topbar">
+      <h1 class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></h1>
+      <nav id="tabs" class="tabs">
+        <button data-tab="dashboard" class="active">Dashboard</button>
+        <button data-tab="subscribers">Assinantes</button>
+        <button data-tab="payments">Pagamentos</button>
+        <button data-tab="plans">Planos</button>
+        <button data-tab="whatsapp">WhatsApp <span class="wa-dot" id="wa-dot"></span></button>
+      </nav>
+      <span class="muted user-email" id="user-email"></span>
+      <a href="/assinar" target="_blank" class="btn small sales-link">Página de vendas ↗</a>
+      <button id="logout" class="btn small">Sair</button>
+    </header>
+
+    <main>
+      <!-- DASHBOARD -->
+      <section id="tab-dashboard">
+        <div class="toolbar">
+          <h2>Visão do mês</h2>
+          <div class="filters">
+            <input type="month" id="dash-month">
+            <select id="dash-filter">
+              <option value="">Todos</option>
+              <option value="pago">Pagos</option>
+              <option value="pendente">Pendentes</option>
+              <option value="atrasado">Atrasados</option>
+              <option value="parcial">Parciais</option>
+            </select>
+          </div>
+        </div>
+        <div class="kpis" id="kpis"></div>
+        <div class="grid2">
+          <div class="card"><h3>Recebido — últimos 6 meses</h3><div class="bars" id="history"></div></div>
+          <div class="card"><h3>Assinantes ativos por plano</h3><div id="by-plan"></div></div>
+        </div>
+        <div class="card methods-card">
+          <h3>Recebido por forma de pagamento <span class="muted" id="methods-month"></span></h3>
+          <div id="by-method" class="methods"></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Assinante</th><th>Plano</th><th>Valor</th><th>Vencimento</th><th>Pago no mês</th><th>Status</th><th></th></tr></thead>
+            <tbody id="dash-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ASSINANTES -->
+      <section id="tab-subscribers" class="hidden">
+        <div class="toolbar">
+          <h2>Assinantes</h2>
+          <div class="filters">
+            <input type="search" id="sub-search" placeholder="Buscar nome, e-mail, telefone">
+            <button class="btn primary" id="new-sub">+ Novo assinante</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nome</th><th>Contato</th><th>Plano</th><th>Início</th><th>Venc.</th><th>Status</th><th></th></tr></thead>
+            <tbody id="sub-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- PAGAMENTOS -->
+      <section id="tab-payments" class="hidden">
+        <div class="toolbar">
+          <h2>Pagamentos</h2>
+          <div class="filters">
+            <input type="month" id="pay-month">
+            <select id="pay-method">
+              <option value="">Todas as formas</option>
+              <option value="pix">Pix</option>
+              <option value="credito">Cartão de crédito</option>
+              <option value="debito">Cartão de débito</option>
+              <option value="boleto">Boleto</option>
+              <option value="dinheiro">Dinheiro</option>
+              <option value="transferencia">Transferência</option>
+            </select>
+            <button class="btn primary" id="new-pay">+ Registrar pagamento</button>
+          </div>
+        </div>
+        <div class="methods-summary" id="pay-summary"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Assinante</th><th>Plano</th><th>Referência</th><th>Valor</th><th>Forma</th><th>Origem</th><th>Obs.</th><th></th></tr></thead>
+            <tbody id="pay-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- PLANOS -->
+      <section id="tab-plans" class="hidden">
+        <div class="toolbar">
+          <h2>Planos</h2>
+          <button class="btn primary" id="new-plan">+ Novo plano</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Plano</th><th>Preço mensal</th><th>Descrição</th><th>Ativos</th><th>Situação</th><th></th></tr></thead>
+            <tbody id="plan-rows"></tbody>
+          </table>
+        </div>
+
+        <form id="form-settings" class="card settings">
+          <div class="settings-head">
+            <div>
+              <h3>Página de vendas</h3>
+              <p class="muted">Aparece em <a href="/assinar" target="_blank">/assinar</a>. Só planos ativos são mostrados.</p>
+            </div>
+            <button class="btn primary">Salvar</button>
+          </div>
+          <div class="row2">
+            <label>Nome da marca<input name="brand_name" placeholder="Assinaturas"></label>
+            <label>WhatsApp para atendimento<input name="whatsapp" placeholder="(11) 91234-5678"></label>
+          </div>
+          <label>Chave Pix (mostrada depois do cadastro)<input name="pix_key" placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"></label>
+          <label>Título principal<input name="headline" placeholder="Escolha seu plano e comece hoje."></label>
+          <label>Subtítulo<input name="subheadline" placeholder="Cadastro em menos de um minuto. Você paga por Pix e fala direto com a gente pelo WhatsApp."></label>
+        </form>
+      </section>
+
+      <!-- WHATSAPP -->
+      <section id="tab-whatsapp" class="hidden">
+        <div class="toolbar">
+          <h2>WhatsApp</h2>
+        </div>
+        <div class="card wa-card">
+          <h3>Conexão dos avisos (Evolution API)</h3>
+          <div id="wa-status"><p class="muted">Verificando conexão…</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal assinante -->
+  <dialog id="dlg-sub">
+    <form method="dialog" id="form-sub">
+      <h3 id="sub-title">Novo assinante</h3>
+      <input type="hidden" name="id">
+      <label>Nome *<input name="name" required></label>
+      <div class="row2">
+        <label>E-mail<input name="email" type="email"></label>
+        <label>WhatsApp / Telefone<input name="phone"></label>
+      </div>
+      <div class="row2">
+        <label>Data de nascimento<input name="birth_date" type="date"></label>
+        <label>Plano *<select name="plan_id" required></select></label>
+      </div>
+      <div class="row2">
+        <label>Início *<input name="start_date" type="date" required></label>
+        <label>Dia de vencimento *<input name="due_day" type="number" min="1" max="28" value="10" required></label>
+      </div>
+      <label>Status
+        <select name="status">
+          <option value="aguardando">Aguardando pagamento</option>
+          <option value="ativo">Ativo</option>
+          <option value="pausado">Pausado</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+      </label>
+      <label>Observações<textarea name="notes" rows="2"></textarea></label>
+      <div class="actions">
+        <button class="btn" value="cancel" formnovalidate>Cancelar</button>
+        <button class="btn primary" value="ok">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal pagamento -->
+  <dialog id="dlg-pay">
+    <form method="dialog" id="form-pay">
+      <h3>Registrar pagamento</h3>
+      <label>Assinante *<select name="subscriber_id" required></select></label>
+      <div class="row2">
+        <label>Mês de referência *<input name="ref_month" type="month" required></label>
+        <label>Data do pagamento *<input name="paid_at" type="date" required></label>
+      </div>
+      <div class="row2">
+        <label>Valor (R$)<input name="amount" type="number" step="0.01" min="0" placeholder="Valor do plano"></label>
+        <label>Forma
+          <select name="method">
+            <option value="pix">Pix</option>
+            <option value="credito">Cartão de crédito</option>
+            <option value="debito">Cartão de débito</option>
+            <option value="boleto">Boleto</option>
+            <option value="dinheiro">Dinheiro</option>
+            <option value="transferencia">Transferência</option>
+          </select>
+        </label>
+      </div>
+      <label>Observações<input name="notes" placeholder="Ex.: parcela 2/5, comprovante..."></label>
+      <div class="actions">
+        <button class="btn" value="cancel" formnovalidate>Cancelar</button>
+        <button class="btn primary" value="ok">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal plano -->
+  <dialog id="dlg-plan">
+    <form method="dialog" id="form-plan">
+      <h3 id="plan-title">Novo plano</h3>
+      <input type="hidden" name="id">
+      <label>Nome *<input name="name" required></label>
+      <label>Preço mensal (R$) *<input name="price" type="number" step="0.01" min="0" required></label>
+      <label>Descrição curta<input name="description" placeholder="Aparece abaixo do nome na página de vendas"></label>
+      <label>Benefícios (um por linha)<textarea name="features" rows="4" placeholder="Acesso completo&#10;Suporte pelo WhatsApp"></textarea></label>
+      <div class="row2">
+        <label>Situação
+          <select name="active"><option value="1">Ativo</option><option value="0">Inativo</option></select>
+        </label>
+        <label class="check"><input type="checkbox" name="featured" value="1"> Destacar como “Recomendado”</label>
+      </div>
+      <div class="actions">
+        <button class="btn" value="cancel" formnovalidate>Cancelar</button>
+        <button class="btn primary" value="ok">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast"></div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
