@@ -158,8 +158,8 @@ memberApi.post('/logout', (req, res) => {
 memberApi.post('/password/forgot', h(async (req) => {
   const email = normEmail(req.body?.email);
   const c = await customerByEmail(email);
-  await issueCode({ scope: 'reset', email, ip: req.ip, allowed: Boolean(c), phone: c?.phone });
-  return { ok: true, message: 'Se este e-mail tiver conta, enviamos um código de 6 dígitos para o WhatsApp cadastrado e para o e-mail. Confira também o spam.' };
+  await issueCode({ scope: 'reset', email, ip: req.ip, allowed: Boolean(c) }); // só por e-mail
+  return { ok: true, message: 'Se este e-mail tiver conta, enviamos um código de 6 dígitos para o seu e-mail. Confira também a caixa de spam.' };
 }));
 
 memberApi.post('/password/reset', h(async (req, res) => {
