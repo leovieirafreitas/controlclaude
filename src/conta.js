@@ -143,11 +143,8 @@ $('#login-form').addEventListener('submit', (e) => {
       formError(f, '');
       if (r.need_code) {
         // 2ª etapa: guarda e-mail e senha só em memória, para o "Reenviar código"
-        loginPending = { email, password: f.password.value };
+        askCode({ email, password: f.password.value }, r.message, 'login');
         f.reset();
-        $('#code-hint').textContent = r.message;
-        formError($('#code-form'), '');
-        goPane('code');
         return;
       }
       f.reset();
@@ -159,6 +156,17 @@ $('#login-form').addEventListener('submit', (e) => {
 });
 
 let loginPending = null;
+let codeBack = 'login';
+function askCode(pending, message, from) {
+  loginPending = pending;
+  codeBack = from;
+  $('#code-title').textContent = from === 'register' ? 'Confirme seu e-mail' : 'Confirme que é você';
+  $('#code-hint').textContent = message;
+  $('#code-form').querySelector('button.btn').textContent = from === 'register' ? 'Confirmar e entrar' : 'Entrar';
+  formError($('#code-form'), '');
+  goPane('code');
+}
+$('#code-back').addEventListener('click', () => { loginPending = null; goPane(codeBack); });
 $('#code-form').code.addEventListener('input', (e) => { e.target.value = digits(e.target.value).slice(0, 6); });
 $('#code-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -170,6 +178,7 @@ $('#code-form').addEventListener('submit', (e) => {
       await call('/login/verify', { method: 'POST', body: { email: loginPending.email, code: f.code.value } });
       loginPending = null;
       f.reset();
+      $('#register-form').reset();
       formError(f, '');
       await afterAuth();
     } catch (err) {
@@ -205,8 +214,13 @@ $('#register-form').addEventListener('submit', (e) => {
   body.accept_terms = true;
   busy(f, async () => {
     try {
-      await call('/register', { method: 'POST', body });
+      const r = await call('/register', { method: 'POST', body });
       formError(f, '');
+      if (r.need_code) {
+        // Conta só vale depois do código: se o e-mail estiver errado, o cliente volta e corrige
+        askCode({ email: body.email.trim(), password: body.password }, r.message, 'register');
+        return;
+      }
       f.reset();
       await afterAuth();
     } catch (err) {

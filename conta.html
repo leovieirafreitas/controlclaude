@@ -46,13 +46,13 @@
 
       <!-- Entrar, 2ª etapa: código enviado ao e-mail -->
       <form id="code-form" class="pane hidden" novalidate>
-        <h2>Confirme que é você</h2>
+        <h2 id="code-title">Confirme que é você</h2>
         <p class="muted" id="code-hint"></p>
         <label>Código de 6 dígitos<input name="code" class="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
         <p class="form-error hidden"></p>
         <button class="btn btn-primary btn-lg btn-block">Entrar</button>
         <button type="button" class="link center-link" id="code-resend">Reenviar código</button>
-        <button type="button" class="link center-link" data-go="login">Voltar</button>
+        <button type="button" class="link center-link" id="code-back">Voltar</button>
       </form>
 
       <!-- Criar conta -->
