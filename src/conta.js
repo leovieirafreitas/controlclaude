@@ -115,9 +115,9 @@ async function afterAuth() {
 // ------------------------------------------------------------------ abas e formulários de acesso
 
 function goPane(name) {
-  for (const f of ['login', 'register', 'forgot', 'reset']) $(`#${f}-form`).classList.toggle('hidden', f !== name);
+  for (const f of ['login', 'code', 'register', 'forgot', 'reset']) $(`#${f}-form`).classList.toggle('hidden', f !== name);
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  $('.tabs').classList.toggle('hidden', name === 'forgot' || name === 'reset');
+  $('.tabs').classList.toggle('hidden', ['forgot', 'reset', 'code'].includes(name));
   const first = $(`#${name}-form input:not([type=hidden]):not([disabled])`);
   first?.focus();
 }
@@ -139,14 +139,54 @@ $('#login-form').addEventListener('submit', (e) => {
   if (!email || !f.password.value) return formError(f, 'Informe e-mail e senha.');
   busy(f, async () => {
     try {
-      await call('/login', { method: 'POST', body: { email, password: f.password.value } });
+      const r = await call('/login', { method: 'POST', body: { email, password: f.password.value } });
       formError(f, '');
+      if (r.need_code) {
+        // 2ª etapa: guarda e-mail e senha só em memória, para o "Reenviar código"
+        loginPending = { email, password: f.password.value };
+        f.reset();
+        $('#code-hint').textContent = r.message;
+        formError($('#code-form'), '');
+        goPane('code');
+        return;
+      }
       f.reset();
       await afterAuth();
     } catch (err) {
       formError(f, err.message);
     }
   });
+});
+
+let loginPending = null;
+$('#code-form').code.addEventListener('input', (e) => { e.target.value = digits(e.target.value).slice(0, 6); });
+$('#code-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (!loginPending) return goPane('login');
+  if (digits(f.code.value).length !== 6) return formError(f, 'Digite os 6 dígitos do código.');
+  busy(f, async () => {
+    try {
+      await call('/login/verify', { method: 'POST', body: { email: loginPending.email, code: f.code.value } });
+      loginPending = null;
+      f.reset();
+      formError(f, '');
+      await afterAuth();
+    } catch (err) {
+      formError(f, err.message);
+    }
+  });
+});
+$('#code-resend').addEventListener('click', async () => {
+  const f = $('#code-form');
+  if (!loginPending) return goPane('login');
+  try {
+    const r = await call('/login', { method: 'POST', body: loginPending });
+    $('#code-hint').textContent = r.message;
+    formError(f, '');
+  } catch (err) {
+    formError(f, err.message);
+  }
 });
 
 $('#register-form').addEventListener('submit', (e) => {
