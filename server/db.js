@@ -16,8 +16,14 @@ pg.types.setTypeParser(1700, (v) => Number(v));     // numeric → número
 pg.types.setTypeParser(1082, (v) => v);             // date → 'AAAA-MM-DD'
 pg.types.setTypeParser(1184, (v) => new Date(v).toISOString()); // timestamptz → ISO
 
+// O pooler do Supabase na porta 5432 ("session mode") aceita só 15 conexões no total: Mac + VPS +
+// o contêiner antigo durante a implantação estouravam o limite (EMAXCONNSESSION) e o site caía.
+// A porta 6543 ("transaction mode") divide poucas conexões reais entre muitos clientes. O sistema não
+// usa nada que dependa de sessão (LISTEN, SET, transações abertas), então é seguro trocar sempre.
+const connectionString = DATABASE_URL.replace(/(pooler\.supabase\.com):5432\//, '$1:6543/');
+
 export const pool = new pg.Pool({
-  connectionString: DATABASE_URL,
+  connectionString,
   ssl: { rejectUnauthorized: false },
   max: 5,
   // Abrir conexão custa ~1 s (SSL + pooler): não fechar por inatividade
