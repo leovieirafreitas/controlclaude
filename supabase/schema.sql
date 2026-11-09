@@ -134,3 +134,7 @@ alter table public.customers add column if not exists terms_version text;
 alter table public.subscribers add column if not exists cancel_at date;               -- último dia de acesso
 alter table public.subscribers add column if not exists cancel_requested_at timestamptz;
 alter table public.subscribers add column if not exists retention_answer text;        -- sim | nao (resposta no WhatsApp)
+
+-- v8: confirmação do e-mail no cadastro (a conta só vale depois do código enviado ao e-mail)
+alter table public.customers add column if not exists email_verified_at timestamptz;
+update public.customers set email_verified_at = coalesce(email_verified_at, created_at, now()) where email_verified_at is null;

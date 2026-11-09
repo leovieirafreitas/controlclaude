@@ -1,6 +1,6 @@
 // Área do assinante: /api/member/*
 //
-// 1. O cliente cria a conta (nome, e-mail, nascimento, WhatsApp opcional, senha).
+// 1. O cliente cria a conta (nome, e-mail, nascimento, WhatsApp, senha) e confirma o e-mail com um código.
 // 2. Logado, escolhe um plano → cria/atualiza a assinatura e vai para o checkout.
 // 3. Na área dele: vê e edita dados, troca senha, vê pagamentos, paga e cancela.
 // Login em duas etapas: e-mail + senha, depois código de 6 dígitos enviado ao e-mail.
@@ -121,15 +121,41 @@ memberApi.post('/register', h(async (req, res) => {
   if (b.accept_terms !== true) throw new ApiError(400, 'Para criar a conta, aceite os Termos de uso e a Política de privacidade.');
   if (signupLimited(req.ip)) throw new ApiError(429, 'Muitas tentativas. Tente de novo em alguns minutos.');
 
+  // A conta nasce "não confirmada" e só vale depois do código enviado ao e-mail.
+  // Se o e-mail já tem cadastro NÃO confirmado (ex.: alguém digitou o e-mail errado ou desistiu),
+  // os dados são substituídos — assim ninguém "segura" o e-mail de outra pessoa.
   const r = await run(`
     INSERT INTO customers (name, email, phone, birth_date, password_hash, terms_accepted_at, terms_version)
-    VALUES (?, ?, ?, ?, ?, now(), ?) ON CONFLICT (email) DO NOTHING RETURNING id`,
+    VALUES (?, ?, ?, ?, ?, now(), ?)
+    ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, birth_date = EXCLUDED.birth_date,
+      password_hash = EXCLUDED.password_hash, terms_accepted_at = now(), terms_version = EXCLUDED.terms_version
+      WHERE customers.email_verified_at IS NULL
+    RETURNING id`,
   [name, email, phone, birth, await hashPassword(password), TERMS_VERSION]);
   if (!r.rowCount) throw new ApiError(409, 'Este e-mail já tem conta. Entre com sua senha ou use "Esqueci minha senha".');
-  notifySignup({ name, email, phone, birth_date: birth });
-  memberSession.set(req, res, email);
-  return { ok: true };
+  return sendAccessCode(req, email, 'Para confirmar seu e-mail, enviamos um código de 6 dígitos para');
 }));
+
+/** Envia o código de acesso (scope login) e devolve a resposta para a tela pedir o código. */
+async function sendAccessCode(req, email, intro = 'Enviamos um código de 6 dígitos para') {
+  try {
+    await issueCode({ scope: 'login', email, ip: req.ip, allowed: true });
+  } catch (err) {
+    // Pediu de novo antes de 1 minuto: o código enviado há pouco continua valendo
+    if (err.status === 429 && /^Aguarde/.test(err.message)) {
+      return { need_code: true, message: `Já enviamos um código para ${email} há pouco. Use esse código ou ${err.message.toLowerCase()}` };
+    }
+    throw err;
+  }
+  return { need_code: true, message: `${intro} ${email}. Confira também a caixa de spam.` };
+}
+
+/** O código chegou ao e-mail: marca o e-mail como confirmado (e avisa o admin do cadastro novo). */
+async function confirmEmail(c) {
+  if (c.email_verified_at) return;
+  const r = await run('UPDATE customers SET email_verified_at = now() WHERE id = ? AND email_verified_at IS NULL', [c.id]);
+  if (r.rowCount) notifySignup({ name: c.name, email: c.email, phone: c.phone, birth_date: c.birth_date });
+}
 
 memberApi.post('/login', h(async (req, res) => {
   const email = normEmail(req.body?.email);
@@ -147,16 +173,8 @@ memberApi.post('/login', h(async (req, res) => {
   }
   failures.delete(emailKey);
   // Verificação em duas etapas: senha certa → código de 6 dígitos no e-mail. Só entra com o código.
-  try {
-    await issueCode({ scope: 'login', email, ip: req.ip, allowed: true });
-  } catch (err) {
-    // Pediu de novo antes de 1 minuto: o código enviado há pouco continua valendo
-    if (err.status === 429 && /^Aguarde/.test(err.message)) {
-      return { need_code: true, message: `Já enviamos um código para ${email} há pouco. Use esse código ou ${err.message.toLowerCase()}` };
-    }
-    throw err;
-  }
-  return { need_code: true, message: `Enviamos um código de 6 dígitos para ${email}. Confira também a caixa de spam.` };
+  // (Se o e-mail ainda não foi confirmado no cadastro, este mesmo código confirma.)
+  return sendAccessCode(req, email, c.email_verified_at ? undefined : 'Para confirmar seu e-mail, enviamos um código de 6 dígitos para');
 }));
 
 // 2ª etapa do login: o código só existe se a senha foi conferida na 1ª etapa
@@ -164,6 +182,7 @@ memberApi.post('/login/verify', h(async (req, res) => {
   const email = normEmail(req.body?.email);
   const c = await customerByEmail(email);
   await checkCode({ scope: 'login', email, code: req.body?.code, allowed: Boolean(c) });
+  await confirmEmail(c);
   memberSession.set(req, res, email);
   return { ok: true };
 }));
@@ -187,6 +206,7 @@ memberApi.post('/password/reset', h(async (req, res) => {
   const c = await customerByEmail(email);
   await checkCode({ scope: 'reset', email, code: req.body?.code, allowed: Boolean(c) });
   await run('UPDATE customers SET password_hash = ? WHERE id = ?', [await hashPassword(password), c.id]);
+  await confirmEmail(c); // o código chegou ao e-mail: ele existe e é da pessoa
   failures.delete(`email:${email}`);
   memberSession.set(req, res, email);
   return { ok: true };
