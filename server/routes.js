@@ -65,25 +65,44 @@ export const h = (fn) => async (req, res) => {
 
 // ---------------------------------------------------------------- planos
 
+// Licenças usadas = assinaturas "ativo" ou "pausado" (o pausado guarda a vaga até regularizar).
+// Use em consultas com a tabela plans apelidada de "p".
+export const LICENSES_USED_SQL = `(SELECT COUNT(*) FROM subscribers s WHERE s.plan_id = p.id AND s.status IN ('ativo', 'pausado'))`;
+export const SOLD_OUT_SQL = `(p.max_licenses IS NOT NULL AND ${LICENSES_USED_SQL} >= p.max_licenses)`;
+
+/** O plano está sem vagas para uma nova licença? */
+export async function planSoldOut(planId) {
+  const r = await get(`SELECT ${SOLD_OUT_SQL} AS sold_out FROM plans p WHERE p.id = ?`, [planId]);
+  return Boolean(r?.sold_out);
+}
+
 api.get('/plans', h(() => all(`
-  SELECT p.*, (SELECT COUNT(*) FROM subscribers s WHERE s.plan_id = p.id AND s.status = 'ativo') AS active_subscribers
+  SELECT p.*, (SELECT COUNT(*) FROM subscribers s WHERE s.plan_id = p.id AND s.status = 'ativo') AS active_subscribers,
+         ${LICENSES_USED_SQL} AS licenses_used
   FROM plans p ORDER BY p.price_cents DESC`)));
+
+function checkMaxLicenses(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null; // sem limite
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new ApiError(400, 'Limite de licenças deve ser um número inteiro maior que zero (ou vazio para sem limite)');
+  return n;
+}
 
 function planValues(body) {
   required(body, 'name', 'price');
   return [
     str(body.name), toCents(body.price), str(body.description), body.active !== false,
-    str(body.features), body.featured === true,
+    str(body.features), body.featured === true, checkMaxLicenses(body.max_licenses),
   ];
 }
 
 api.post('/plans', h(async ({ body }) => {
-  const r = await run('INSERT INTO plans (name, price_cents, description, active, features, featured) VALUES (?, ?, ?, ?, ?, ?) RETURNING id', planValues(body));
+  const r = await run('INSERT INTO plans (name, price_cents, description, active, features, featured, max_licenses) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id', planValues(body));
   return { id: r.rows[0].id };
 }));
 
 api.put('/plans/:id', h(async ({ body, params }) => {
-  await run('UPDATE plans SET name = ?, price_cents = ?, description = ?, active = ?, features = ?, featured = ? WHERE id = ?', [...planValues(body), Number(params.id)]);
+  await run('UPDATE plans SET name = ?, price_cents = ?, description = ?, active = ?, features = ?, featured = ?, max_licenses = ? WHERE id = ?', [...planValues(body), Number(params.id)]);
   return { ok: true };
 }));
 

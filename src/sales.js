@@ -22,7 +22,7 @@ function renderPlans(plans) {
     const [reais, cents] = (p.price_cents / 100).toFixed(2).split('.');
     const features = String(p.features || '').split('\n').map((f) => f.trim()).filter(Boolean);
     return `
-      <article class="plan ${p.featured ? 'featured' : ''}">
+      <article class="plan ${p.featured ? 'featured' : ''} ${p.sold_out ? 'sold-out' : ''}">
         ${p.featured ? '<span class="ribbon">Recomendado</span>' : ''}
         <h3>${esc(p.name)}</h3>
         ${p.description ? `<p class="plan-desc">${esc(p.description)}</p>` : ''}
@@ -30,7 +30,9 @@ function renderPlans(plans) {
           <span class="cur">R$</span><span class="int">${Number(reais).toLocaleString('pt-BR')}</span><span class="dec">,${cents}</span><span class="per">/mês</span>
         </div>
         ${features.length ? `<ul class="features">${features.map((f) => `<li>${CHECK}<span>${esc(f)}</span></li>`).join('')}</ul>` : '<div class="spacer"></div>'}
-        <a class="btn ${p.featured ? 'btn-primary' : 'btn-outline'} btn-lg btn-block" href="/conta?plano=${p.id}">Assinar ${esc(p.name)}</a>
+        ${p.sold_out
+    ? '<button class="btn btn-outline btn-lg btn-block" disabled>Esgotado</button>'
+    : `<a class="btn ${p.featured ? 'btn-primary' : 'btn-outline'} btn-lg btn-block" href="/conta?plano=${p.id}">Assinar ${esc(p.name)}</a>`}
       </article>`;
   }).join('');
 }

@@ -9,6 +9,12 @@ async function loadSettings() {
   for (const [k, v] of Object.entries(s)) if (f[k]) f[k].value = v;
 }
 
+function licenses(p) {
+  if (p.max_licenses == null) return `${p.licenses_used} <span class="muted">/ sem limite</span>`;
+  const full = p.licenses_used >= p.max_licenses;
+  return `${p.licenses_used} / ${p.max_licenses}${full ? ' <span class="badge b-cancelado">Esgotado</span>' : ''}`;
+}
+
 export async function loadPlans() {
   loadSettings().catch(() => {});
   plans = await api.plans();
@@ -18,13 +24,14 @@ export async function loadPlans() {
       <td class="num">${brl(p.price_cents)}</td>
       <td class="muted">${esc(p.description)}</td>
       <td>${p.active_subscribers}</td>
+      <td>${licenses(p)}</td>
       <td>${badge(p.active ? 'ativo' : 'inativo')}</td>
       <td>
         <button class="btn small" data-edit="${p.id}">Editar</button>
         <button class="btn small danger" data-del="${p.id}">Excluir</button>
       </td>
     </tr>`).join('')
-    || '<tr><td colspan="6" class="empty">Nenhum plano.</td></tr>';
+    || '<tr><td colspan="7" class="empty">Nenhum plano.</td></tr>';
 }
 
 function openPlan(plan) {
@@ -38,6 +45,7 @@ function openPlan(plan) {
   f.active.value = !plan || plan.active ? '1' : '0';
   f.features.value = plan?.features ?? '';
   f.featured.checked = Boolean(plan?.featured);
+  f.max_licenses.value = plan?.max_licenses ?? '';
   $('#dlg-plan').showModal();
 }
 

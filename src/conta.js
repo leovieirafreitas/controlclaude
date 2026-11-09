@@ -91,6 +91,10 @@ async function showChosenPlan() {
   const info = await fetch('/api/public/info').then((r) => r.json()).catch(() => null);
   const plan = info?.plans.find((p) => String(p.id) === String(pendingPlan));
   if (!plan) return clearPending();
+  if (plan.sold_out) {
+    clearPending();
+    return flash(`O plano ${plan.name} está esgotado no momento. Escolha outro plano.`, 'bad');
+  }
   const box = $('#chosen-plan');
   box.innerHTML = `<span>Plano escolhido</span><strong>${esc(plan.name)}</strong><em>${brl(plan.price_cents)}/mês</em>`;
   box.classList.remove('hidden');
@@ -277,7 +281,9 @@ function renderPlanChoices(plans, currentId) {
       <div><strong>${esc(p.name)}</strong>${p.description ? `<span class="muted">${esc(p.description)}</span>` : ''}</div>
       <div class="mini-right">
         <span class="mini-price">${brl(p.price_cents)}<small>/mês</small></span>
-        <button class="btn ${p.featured ? 'btn-primary' : 'btn-outline'}" data-plan="${p.id}">${p.id === currentId ? 'Pagar este plano' : 'Assinar'}</button>
+        ${p.sold_out
+    ? '<button class="btn btn-outline" disabled>Esgotado</button>'
+    : `<button class="btn ${p.featured ? 'btn-primary' : 'btn-outline'}" data-plan="${p.id}">${p.id === currentId ? 'Pagar este plano' : 'Assinar'}</button>`}
       </div>
     </div>`).join('') || '<p class="muted">Nenhum plano disponível no momento.</p>';
 }
@@ -315,7 +321,7 @@ function render(data) {
     $('#keep-box').classList.toggle('hidden', !scheduled);
     if (scheduled) $('#keep-text').innerHTML = `Você pediu o cancelamento. Seu plano continua ativo até <strong>${fmtDate(sub.cancel_at)}</strong> e depois será encerrado. Mudou de ideia?`;
     $('#change-btn').classList.toggle('hidden', active);
-    $('#pay-btn').classList.toggle('hidden', !can_pay || scheduled);
+    $('#pay-btn').classList.toggle('hidden', !can_pay || scheduled || sub.plan.sold_out);
     $('#check-btn').classList.toggle('hidden', !can_pay || scheduled || (active && next.current_paid));
     $('#pay-btn').textContent = cancelled ? 'Reativar plano' : next.current_paid ? `Adiantar ${fmtMonth(next.month)}` : `Pagar ${fmtMonth(next.month)}`;
     $('#charge-info').textContent = cancelled
@@ -323,6 +329,7 @@ function render(data) {
       : scheduled ? 'Cancelamento agendado: você não será mais cobrado.'
       : next.current_paid
         ? 'Sua mensalidade deste mês está paga. Obrigado!'
+        : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
         : `Mensalidade de ${fmtMonth(next.month)} em aberto.`;
   }
 

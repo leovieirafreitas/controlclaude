@@ -160,7 +160,7 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Plano</th><th>Preço mensal</th><th>Descrição</th><th>Ativos</th><th>Situação</th><th></th></tr></thead>
+            <thead><tr><th>Plano</th><th>Preço mensal</th><th>Descrição</th><th>Ativos</th><th>Licenças</th><th>Situação</th><th></th></tr></thead>
             <tbody id="plan-rows"></tbody>
           </table>
         </div>
@@ -269,6 +269,8 @@
       <label>Preço mensal (R$) *<input name="price" type="number" step="0.01" min="0" required></label>
       <label>Descrição curta<input name="description" placeholder="Aparece abaixo do nome na página de vendas"></label>
       <label>Benefícios (um por linha)<textarea name="features" rows="4" placeholder="Acesso completo&#10;Suporte pelo WhatsApp"></textarea></label>
+      <label>Limite de licenças<input name="max_licenses" type="number" min="1" step="1" placeholder="Vazio = sem limite">
+        <small class="muted">Ao atingir esse número de assinaturas ativas (ou pausadas), o plano aparece como esgotado e não aceita novas compras.</small></label>
       <div class="row2">
         <label>Situação
           <select name="active"><option value="1">Ativo</option><option value="0">Inativo</option></select>
