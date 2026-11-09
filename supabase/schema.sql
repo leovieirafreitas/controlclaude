@@ -138,3 +138,7 @@ alter table public.subscribers add column if not exists retention_answer text;  
 -- v8: confirmação do e-mail no cadastro (a conta só vale depois do código enviado ao e-mail)
 alter table public.customers add column if not exists email_verified_at timestamptz;
 update public.customers set email_verified_at = coalesce(email_verified_at, created_at, now()) where email_verified_at is null;
+
+-- v9: limite de licenças por plano. Vazio (null) = sem limite.
+-- Contam como licença usada as assinaturas "ativo" e "pausado". Atingido o limite, o plano aparece como esgotado.
+alter table public.plans add column if not exists max_licenses integer check (max_licenses is null or max_licenses > 0);

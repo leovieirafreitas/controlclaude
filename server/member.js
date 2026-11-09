@@ -7,11 +7,15 @@
 // Esqueci a senha: código por e-mail (Resend) + nova senha.
 import { Router } from 'express';
 import { all, get, run } from './db.js';
-import { ApiError, h, str, todayISO, getSettings } from './routes.js';
+import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, planSoldOut } from './routes.js';
 import { EMAIL_RE, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
 import { notifyCancel, notifyKeep, notifySignup } from './whatsapp.js';
 import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber } from './mp.js';
+
+// Assinaturas nesses status já ocupam uma licença do plano: podem pagar mesmo com o plano esgotado.
+const HOLDS_LICENSE = ['ativo', 'pausado'];
+const SOLD_OUT_MSG = 'Este plano está esgotado no momento. Escolha outro plano ou fale com o suporte.';
 
 export const memberApi = Router();
 // Versão dos Termos de uso / Política de privacidade (mude junto com a data nas páginas termos.html e privacidade.html)
@@ -231,13 +235,14 @@ async function memberViewByEmail(email) {
   const [customer, sub, plans, payments] = await Promise.all([
     customerByEmail(email),
     get(`
-      SELECT s.*, p.name AS plan_name, p.price_cents, p.description AS plan_description,
+      SELECT s.*, p.name AS plan_name, p.price_cents, p.description AS plan_description, ${SOLD_OUT_SQL} AS plan_sold_out,
              (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this_month
       FROM subscribers s
       JOIN plans p ON p.id = s.plan_id
       JOIN customers c ON c.id = s.customer_id
       WHERE c.email = ? ORDER BY s.id DESC LIMIT 1`, [month, email]),
-    all('SELECT id, name, price_cents, description, features, featured FROM plans WHERE active ORDER BY price_cents'),
+    all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, ${SOLD_OUT_SQL} AS sold_out
+         FROM plans p WHERE p.active ORDER BY p.price_cents`),
     all(`
       SELECT pay.ref_month, pay.amount_cents, pay.paid_at, pay.method FROM payments pay
       WHERE pay.subscriber_id = (
@@ -257,7 +262,8 @@ async function memberViewByEmail(email) {
     }
     subscription = {
       status: sub.status, start_date: sub.start_date, due_day: sub.due_day, cancel_at: sub.cancel_at || null,
-      plan: { id: sub.plan_id, name: sub.plan_name, price_cents: sub.price_cents, description: sub.plan_description },
+      plan: { id: sub.plan_id, name: sub.plan_name, price_cents: sub.price_cents, description: sub.plan_description,
+        sold_out: sub.plan_sold_out && !HOLDS_LICENSE.includes(sub.status) },
       next_charge: { month: next, current_paid: next !== month },
     };
   }
@@ -303,6 +309,8 @@ memberApi.post('/subscribe', h(async (req) => {
   if (sub && sub.status === 'ativo' && sub.plan_id !== plan.id) {
     throw new ApiError(409, 'Você já tem um plano ativo. Para trocar de plano, fale com o suporte.');
   }
+  const holdsLicense = sub && sub.plan_id === plan.id && HOLDS_LICENSE.includes(sub.status);
+  if (!holdsLicense && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
 
   const today = todayISO();
   if (!sub) {
@@ -333,6 +341,7 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   const sub = await requireSubscription(c);
   const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
+  if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
   const month = await billingMonth(sub, plan.price_cents);
 
   if (req.body?.method === 'pix') {

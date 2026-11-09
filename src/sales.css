@@ -67,6 +67,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .6; cursor: wait; }
+.plan.sold-out { opacity: .7; }
+.plan.sold-out:hover { transform: none; }
+.plan.sold-out .btn:disabled { cursor: not-allowed; }
 .btn-lg { padding: 15px 24px; font-size: 16px; }
 .btn-sm { padding: 7px 12px; font-size: 13px; }
 .btn-block { width: 100%; }
