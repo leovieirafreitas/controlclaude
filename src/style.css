@@ -255,6 +255,9 @@ label.check input { width: auto; }
 .wa-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 4px; vertical-align: middle; background: transparent; }
 .wa-dot.on { background: #25d366; }
 .wa-dot.off { background: var(--bad); }
+/* bolinha de "cadastro novo" na aba Clientes */
+.new-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 4px; vertical-align: middle; background: var(--accent); }
+.small-note { font-size: 13px; margin: -8px 0 12px; }
 .wa-card { max-width: 720px; display: grid; gap: 14px; }
 .wa-card h3 { margin: 0; }
 .wa-card p { margin: 0; }

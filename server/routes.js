@@ -135,6 +135,16 @@ api.get('/subscribers', h(() => all(`
   FROM subscribers s JOIN plans p ON p.id = s.plan_id
   ORDER BY s.status = 'aguardando' DESC, lower(s.name)`)));
 
+// Contas criadas na área do assinante (/conta): cadastro, e-mail confirmado e situação do plano
+api.get('/customers', h(() => all(`
+  SELECT c.id, c.name, c.email, c.phone, c.birth_date, c.created_at, c.email_verified_at,
+         s.id AS subscriber_id, s.status, s.cancel_at, p.name AS plan_name, p.price_cents,
+         (SELECT MAX(paid_at) FROM payments pay WHERE pay.subscriber_id = s.id) AS last_paid_at
+  FROM customers c
+  LEFT JOIN LATERAL (SELECT * FROM subscribers WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) s ON true
+  LEFT JOIN plans p ON p.id = s.plan_id
+  ORDER BY c.created_at DESC`)));
+
 api.post('/subscribers', h(async ({ body }) => {
   const r = await run(`
     INSERT INTO subscribers (name, email, phone, plan_id, start_date, due_day, status, notes, birth_date)
