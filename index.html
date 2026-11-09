@@ -38,6 +38,7 @@
       <h1 class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></h1>
       <nav id="tabs" class="tabs">
         <button data-tab="dashboard" class="active">Dashboard</button>
+        <button data-tab="customers">Clientes <span class="new-dot hidden" id="cust-dot"></span></button>
         <button data-tab="subscribers">Assinantes</button>
         <button data-tab="payments">Pagamentos</button>
         <button data-tab="plans">Planos</button>
@@ -77,6 +78,32 @@
           <table>
             <thead><tr><th>Assinante</th><th>Plano</th><th>Valor</th><th>Vencimento</th><th>Pago no mês</th><th>Status</th><th></th></tr></thead>
             <tbody id="dash-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- CLIENTES (contas criadas na área do assinante) -->
+      <section id="tab-customers" class="hidden">
+        <div class="toolbar">
+          <h2>Clientes cadastrados</h2>
+          <div class="filters">
+            <input type="search" id="cust-search" placeholder="Buscar nome, e-mail, telefone">
+            <select id="cust-filter">
+              <option value="">Todos</option>
+              <option value="ativo">Plano ativo</option>
+              <option value="aguardando">Aguardando pagamento</option>
+              <option value="sem-plano">Sem plano</option>
+              <option value="nao-confirmado">E-mail não confirmado</option>
+              <option value="cancelado">Cancelado / pausado</option>
+            </select>
+          </div>
+        </div>
+        <div class="kpis" id="cust-kpis"></div>
+        <p class="muted small-note">Atualiza sozinho a cada 30 segundos. <span id="cust-updated"></span></p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Cliente</th><th>Contato</th><th>Cadastro</th><th>E-mail</th><th>Plano</th><th>Situação</th></tr></thead>
+            <tbody id="cust-rows"></tbody>
           </table>
         </div>
       </section>

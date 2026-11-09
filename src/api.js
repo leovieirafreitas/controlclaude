@@ -54,6 +54,7 @@ export const api = {
   settings: () => request('/settings'),
   saveSettings: (body) => request('/settings', { method: 'PUT', body }),
 
+  customers: () => request('/customers'),
   subscribers: () => request('/subscribers'),
   saveSubscriber: (id, body) => request(id ? `/subscribers/${id}` : '/subscribers', { method: id ? 'PUT' : 'POST', body }),
   deleteSubscriber: (id) => request(`/subscribers/${id}`, { method: 'DELETE' }),
