@@ -2,7 +2,6 @@
 //   POST /api/login/code   { email }       → envia código se o e-mail estiver em ADMIN_EMAILS
 //   POST /api/login/verify { email, code } → cria a sessão do admin
 import { mailConfigured } from './mail.js';
-import { ADMIN_WHATSAPP_NUMBERS } from './whatsapp.js';
 import { SECRET, OtpError, checkCode, issueCode, makeSession, normEmail, safeEqual } from './otp.js';
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
@@ -45,8 +44,8 @@ export async function requestCode(req, res) {
   if (authProblems.length) return notConfigured(res);
   const email = normEmail(req.body?.email);
   try {
-    await issueCode({ scope: 'admin', email, ip: req.ip, allowed: isAdminEmail(email), phone: ADMIN_WHATSAPP_NUMBERS });
-    res.json({ ok: true, message: 'Se este e-mail tiver acesso ao painel, enviamos um código para ele e para o WhatsApp do administrador. Confira também o spam.' });
+    await issueCode({ scope: 'admin', email, ip: req.ip, allowed: isAdminEmail(email) }); // só por e-mail
+    res.json({ ok: true, message: 'Se este e-mail tiver acesso ao painel, enviamos um código para ele. Confira também o spam.' });
   } catch (err) {
     sendError(res, err);
   }
