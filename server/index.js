@@ -26,6 +26,19 @@ app.disable('x-powered-by');
 app.set('trust proxy', process.env.TRUST_PROXY ? (Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY) : (PROD ? 1 : 'loopback'));
 app.use(express.json({ limit: '20kb' }));
 
+// Cabeçalhos de segurança em todas as respostas
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');            // navegador não "adivinha" o tipo do arquivo
+  res.setHeader('X-Frame-Options', 'DENY');                      // ninguém coloca o site dentro de outro (clickjacking)
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'");
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  if (PROD) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains'); // sempre HTTPS
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store'); // dados não ficam em cache
+  next();
+});
+
 app.use('/api/public', publicApi);
 app.use('/api/member', memberApi);
 app.post('/api/login/code', requestCode);

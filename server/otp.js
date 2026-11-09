@@ -119,7 +119,8 @@ export function makeSession({ cookie, maxAgeMs, sameSite }) {
       const emailB64 = Buffer.from(email).toString('base64url');
       const expires = String(Date.now() + maxAgeMs);
       res.cookie(cookie, `${emailB64}.${expires}.${hmac(`${cookie}.${emailB64}.${expires}`)}`, {
-        httpOnly: true, sameSite, secure: req.secure, maxAge: maxAgeMs, path: '/',
+        // Em produção o cookie só trafega por HTTPS, mesmo que o proxy não informe o protocolo
+        httpOnly: true, sameSite, secure: req.secure || process.env.NODE_ENV === 'production', maxAge: maxAgeMs, path: '/',
       });
     },
     clear(res) {
