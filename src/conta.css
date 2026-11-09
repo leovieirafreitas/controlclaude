@@ -165,3 +165,10 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 .keep-box { display: grid; gap: 10px; margin-top: 6px; padding: 14px 16px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); }
 .keep-box p { margin: 0; }
 .keep-box .btn { justify-self: start; }
+
+/* ícones das formas de pagamento (src/icons.js) */
+.pm-icon { width: 15px; height: 15px; flex: none; vertical-align: -2px; }
+.pm-inline { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pm-inline.m-pix .pm-icon { color: #32bcad; }
+#pay-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+#pay-tabs button .pm-icon { width: 17px; height: 17px; }

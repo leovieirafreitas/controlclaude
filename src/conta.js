@@ -1,4 +1,5 @@
 import { enhanceControls } from './controls.js';
+import { methodIcon } from './icons.js';
 
 enhanceControls(); // calendário com o visual do site
 
@@ -335,7 +336,7 @@ function render(data) {
 
   $('#payments-card').classList.toggle('hidden', !sub);
   $('#payments').innerHTML = payments.length
-    ? payments.map((p) => `<tr><td>${fmtDate(p.paid_at)}</td><td>${fmtMonth(p.ref_month)}</td><td>${esc(METHOD[p.method] || p.method)}</td><td class="r">${brl(p.amount_cents)}</td></tr>`).join('')
+    ? payments.map((p) => `<tr><td>${fmtDate(p.paid_at)}</td><td>${fmtMonth(p.ref_month)}</td><td><span class="pm-inline m-${esc(p.method)}">${methodIcon(p.method)}${esc(METHOD[p.method] || p.method)}</span></td><td class="r">${brl(p.amount_cents)}</td></tr>`).join('')
     : '<tr><td colspan="4" class="empty">Nenhum pagamento ainda.</td></tr>';
 
   show('#panel');
@@ -452,6 +453,7 @@ function closePayment() {
   if ($('#pay-dlg').open) $('#pay-dlg').close();
 }
 
+document.querySelectorAll('.pm-slot').forEach((el) => { el.outerHTML = methodIcon(el.dataset.icon); }); // ícones Pix/cartão nas abas
 document.querySelectorAll('#pay-tabs button').forEach((b) => b.addEventListener('click', () => payMethod(b.dataset.method)));
 $('#pay-close').addEventListener('click', closePayment);
 $('#pay-dlg').addEventListener('cancel', () => { stopPix(); unmountBrick(); });

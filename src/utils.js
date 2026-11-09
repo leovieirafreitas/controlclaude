@@ -1,3 +1,4 @@
+import { methodIcon } from './icons.js';
 export const $ = (selector) => document.querySelector(selector);
 
 export const brl = (cents) =>
@@ -27,8 +28,9 @@ export const METHOD_LABEL = {
   pix: 'Pix', credito: 'Cartão de crédito', debito: 'Cartão de débito', cartao: 'Cartão',
   boleto: 'Boleto', dinheiro: 'Dinheiro', transferencia: 'Transferência',
 };
-const METHOD_ICON = { pix: '◆', credito: '▭', debito: '▭', cartao: '▭', boleto: '▤', dinheiro: '$', transferencia: '⇄' };
-export const methodChip = (m) => `<span class="chip m-${esc(m)}">${METHOD_ICON[m] || '•'} ${esc(METHOD_LABEL[m] || m)}</span>`;
+export const methodChip = (m) => `<span class="chip m-${esc(m)}">${methodIcon(m)} ${esc(METHOD_LABEL[m] || m)}</span>`;
+/** Ícone + nome da forma de pagamento, em texto discreto (sem o "chip" colorido). */
+export const methodInline = (m) => `<span class="pm-inline m-${esc(m)}">${methodIcon(m)}${esc(METHOD_LABEL[m] || m)}</span>`;
 
 let toastTimer;
 export function toast(message) {
