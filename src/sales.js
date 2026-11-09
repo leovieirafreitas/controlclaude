@@ -11,7 +11,20 @@ function waLink(number, text) {
 
 const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
 
+/** Selo de vagas: só aparece quando o plano tem limite de licenças. */
+function spots(p) {
+  if (p.sold_out) return '<p class="spots out">Esgotado: todas as vagas foram preenchidas</p>';
+  if (p.licenses_left == null) return '';
+  const n = p.licenses_left;
+  return `<p class="spots">${n === 1 ? 'Resta só 1 vaga' : `Restam ${n} vagas`}</p>`;
+}
+
+let lastPlans = '';
+
 function renderPlans(plans) {
+  const key = JSON.stringify(plans);
+  if (key === lastPlans) return; // nada mudou: não redesenha
+  lastPlans = key;
   const box = $('#plans');
   if (!plans.length) {
     box.innerHTML = '<p class="empty">Nenhum plano disponível no momento. Volte em breve.</p>';
@@ -29,6 +42,7 @@ function renderPlans(plans) {
         <div class="price">
           <span class="cur">R$</span><span class="int">${Number(reais).toLocaleString('pt-BR')}</span><span class="dec">,${cents}</span><span class="per">/mês</span>
         </div>
+        ${spots(p)}
         ${features.length ? `<ul class="features">${features.map((f) => `<li>${CHECK}<span>${esc(f)}</span></li>`).join('')}</ul>` : '<div class="spacer"></div>'}
         ${p.sold_out
     ? '<button class="btn btn-outline btn-lg btn-block" disabled>Esgotado</button>'
@@ -55,15 +69,20 @@ function applySettings(settings) {
 
 $('#year').textContent = new Date().getFullYear();
 
-fetch('/api/public/info')
+const loadInfo = () => fetch('/api/public/info', { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : Promise.reject()))
   .then((data) => {
     applySettings(data.settings);
     renderPlans(data.plans);
-  })
-  .catch(() => {
-    $('#plans').innerHTML = '<p class="empty">Não foi possível carregar os planos. Atualize a página.</p>';
   });
+
+loadInfo().catch(() => {
+  $('#plans').innerHTML = '<p class="empty">Não foi possível carregar os planos. Atualize a página.</p>';
+});
+
+// O que for mudado no painel (preço, limite de licenças, esgotado) aparece aqui sem recarregar a página
+setInterval(() => { if (!document.hidden) loadInfo().catch(() => {}); }, 30_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadInfo().catch(() => {}); });
 
 // Se já estiver logado, troca "Entrar" por "Minha conta"
 fetch('/api/member/me', { credentials: 'same-origin' })

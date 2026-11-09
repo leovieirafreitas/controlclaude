@@ -69,6 +69,8 @@ export const h = (fn) => async (req, res) => {
 // Use em consultas com a tabela plans apelidada de "p".
 export const LICENSES_USED_SQL = `(SELECT COUNT(*) FROM subscribers s WHERE s.plan_id = p.id AND s.status IN ('ativo', 'pausado'))`;
 export const SOLD_OUT_SQL = `(p.max_licenses IS NOT NULL AND ${LICENSES_USED_SQL} >= p.max_licenses)`;
+// Vagas que sobram (null = sem limite)
+export const LICENSES_LEFT_SQL = `(CASE WHEN p.max_licenses IS NULL THEN NULL ELSE GREATEST(p.max_licenses - ${LICENSES_USED_SQL}, 0) END)`;
 
 /** O plano está sem vagas para uma nova licença? */
 export async function planSoldOut(planId) {

@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { hmac } from './otp.js';
 import { handleIncomingMessage } from './whatsapp.js';
 import { all } from './db.js';
-import { h, getSettings, SOLD_OUT_SQL } from './routes.js';
+import { h, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL } from './routes.js';
 import { mpConfigured, syncOrderId } from './mp.js';
 
 export const publicApi = Router();
@@ -12,7 +12,7 @@ export const publicApi = Router();
 publicApi.get('/info', h(async () => {
   const [{ pix_key, ...settings }, plans] = await Promise.all([ // a chave Pix não vai para a página
     getSettings(),
-    all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, ${SOLD_OUT_SQL} AS sold_out
+    all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, ${SOLD_OUT_SQL} AS sold_out, ${LICENSES_LEFT_SQL} AS licenses_left
          FROM plans p WHERE p.active ORDER BY p.price_cents ASC`),
   ]);
   return { settings, plans, online_payment: mpConfigured };
