@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, brl, esc, fmtDate, fmtMonth, badge, thisMonth, methodChip, METHOD_LABEL } from '../utils.js';
+import { $, brl, esc, fmtDate, fmtMonth, badge, thisMonth, methodChip, methodInline } from '../utils.js';
 import { openPayment } from './payments.js';
 
 let data = null;
@@ -63,7 +63,7 @@ function renderRows() {
       <td>${esc(s.plan_name)}</td>
       <td class="num">${brl(s.price_cents)}</td>
       <td>${String(s.due_day).padStart(2, '0')}/${month}</td>
-      <td class="num">${s.paid_cents ? `${brl(s.paid_cents)}<div class="muted">${fmtDate(s.last_paid_at)} · ${(s.paid_methods || '').split(',').map((m) => METHOD_LABEL[m] || m).join(' + ')}</div>` : '—'}</td>
+      <td class="num">${s.paid_cents ? `${brl(s.paid_cents)}<div class="muted">${fmtDate(s.last_paid_at)} · ${(s.paid_methods || '').split(',').filter(Boolean).map(methodInline).join(' + ')}</div>` : '—'}</td>
       <td>${badge(s.pay_status)}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
       <td>${s.pay_status !== 'pago' ? `<button class="btn small primary" data-quickpay="${s.id}">Marcar pago</button>` : ''}</td>
     </tr>`).join('')

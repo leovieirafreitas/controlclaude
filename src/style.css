@@ -289,3 +289,8 @@ label.check input { width: auto; }
 @media (max-width: 1320px) { .topbar .user-email { display: none; } .topbar .sales-link { margin-left: auto; } }
 
 .boot-msg { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 8px 16px; font-size: 14px; color: var(--muted); box-shadow: 0 6px 20px rgba(0,0,0,.15); z-index: 50; }
+
+/* ícones das formas de pagamento (src/icons.js) */
+.pm-icon { width: 15px; height: 15px; flex: none; vertical-align: -2px; }
+.pm-inline { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pm-inline.m-pix .pm-icon { color: #32bcad; }
