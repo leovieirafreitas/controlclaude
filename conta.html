@@ -44,6 +44,17 @@
         <button type="button" class="link center-link" data-go="forgot">Esqueci minha senha</button>
       </form>
 
+      <!-- Entrar, 2ª etapa: código enviado ao e-mail -->
+      <form id="code-form" class="pane hidden" novalidate>
+        <h2>Confirme que é você</h2>
+        <p class="muted" id="code-hint"></p>
+        <label>Código de 6 dígitos<input name="code" class="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+        <p class="form-error hidden"></p>
+        <button class="btn btn-primary btn-lg btn-block">Entrar</button>
+        <button type="button" class="link center-link" id="code-resend">Reenviar código</button>
+        <button type="button" class="link center-link" data-go="login">Voltar</button>
+      </form>
+
       <!-- Criar conta -->
       <form id="register-form" class="pane hidden" novalidate>
         <label>Nome completo<input name="name" autocomplete="name" required maxlength="120"></label>

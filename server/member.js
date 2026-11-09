@@ -3,6 +3,7 @@
 // 1. O cliente cria a conta (nome, e-mail, nascimento, WhatsApp opcional, senha).
 // 2. Logado, escolhe um plano → cria/atualiza a assinatura e vai para o checkout.
 // 3. Na área dele: vê e edita dados, troca senha, vê pagamentos, paga e cancela.
+// Login em duas etapas: e-mail + senha, depois código de 6 dígitos enviado ao e-mail.
 // Esqueci a senha: código por e-mail (Resend) + nova senha.
 import { Router } from 'express';
 import { all, get, run } from './db.js';
@@ -145,6 +146,24 @@ memberApi.post('/login', h(async (req, res) => {
     throw new ApiError(401, 'E-mail ou senha incorretos.');
   }
   failures.delete(emailKey);
+  // Verificação em duas etapas: senha certa → código de 6 dígitos no e-mail. Só entra com o código.
+  try {
+    await issueCode({ scope: 'login', email, ip: req.ip, allowed: true });
+  } catch (err) {
+    // Pediu de novo antes de 1 minuto: o código enviado há pouco continua valendo
+    if (err.status === 429 && /^Aguarde/.test(err.message)) {
+      return { need_code: true, message: `Já enviamos um código para ${email} há pouco. Use esse código ou ${err.message.toLowerCase()}` };
+    }
+    throw err;
+  }
+  return { need_code: true, message: `Enviamos um código de 6 dígitos para ${email}. Confira também a caixa de spam.` };
+}));
+
+// 2ª etapa do login: o código só existe se a senha foi conferida na 1ª etapa
+memberApi.post('/login/verify', h(async (req, res) => {
+  const email = normEmail(req.body?.email);
+  const c = await customerByEmail(email);
+  await checkCode({ scope: 'login', email, code: req.body?.code, allowed: Boolean(c) });
   memberSession.set(req, res, email);
   return { ok: true };
 }));
