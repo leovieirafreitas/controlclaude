@@ -337,7 +337,8 @@ function render(data) {
     const showPay = can_pay && !scheduled && !sub.plan.sold_out && (!apOn || failed);
     $('#pay-btn').classList.toggle('hidden', !showPay);
     $('#check-btn').classList.toggle('hidden', !can_pay || scheduled || (active && next.current_paid));
-    $('#pay-btn').textContent = failed ? 'Pagar com outro cartão'
+    $('#pay-btn').textContent = sub.autopay_blocked && !next.current_paid ? `Pagar ${fmtMonth(next.month)} no cartão`
+      : failed ? 'Pagar com outro cartão'
       : cancelled ? 'Reativar plano'
       : next.current_paid ? 'Ativar renovação automática'
       : `Assinar com cartão de crédito`;
@@ -454,13 +455,18 @@ async function mountBrick() {
 function openPayment(mode = 'pay') {
   const sub = state.subscription;
   if (!sub || !state.can_pay) return;
+  // renovação automática recusada há poucos dias: vai direto para o pagamento avulso deste mês
+  if (mode === 'pay' && sub.autopay_blocked) mode = 'once';
   payMode = mode;
   const price = brl(sub.plan.price_cents);
-  $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : 'Cartão de crédito · renovação automática'}`;
+  $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : mode === 'once' ? 'Cartão de crédito · pagamento deste mês' : 'Cartão de crédito · renovação automática'}`;
   $('#pay-plan').textContent = sub.plan.name;
   $('#pay-amount').textContent = `${price}/mês`;
   $('#pay-month').innerHTML = mode === 'card'
     ? 'As próximas cobranças automáticas serão feitas no novo cartão. <strong>Nada é cobrado agora.</strong>'
+    : mode === 'once'
+      ? `Pague <strong>este mês (${price})</strong> no cartão de crédito, de forma avulsa (mensalidade de ${fmtMonth(sub.next_charge.month)}).
+         No próximo vencimento, tentamos ativar a renovação automática outra vez.`
     : `Cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, neste cartão.
        Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do período pago, sem estorno.`;
   $('#card-error').classList.add('hidden');
