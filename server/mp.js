@@ -244,18 +244,19 @@ async function recordAutopayCharge(subId, invoice) {
   // cobre o primeiro mês ainda não quitado (mesma regra do pagamento avulso)
   const month = await (await import('./member.js')).billingMonth(sub, sub.price_cents);
   const amountCents = Math.round(Number(invoice.transaction_amount || pay.transaction_amount || 0) * 100);
+  const ref = invoice.id || pay.id; // logo após a cobrança, a fatura às vezes ainda vem sem número
   const r = await run(`
     INSERT INTO payments (subscriber_id, ref_month, amount_cents, paid_at, method, notes, mp_payment_id)
     VALUES (?, ?, ?, ?, 'credito', ?, ?)
     ON CONFLICT (mp_payment_id) WHERE mp_payment_id IS NOT NULL DO NOTHING`,
-  [sub.id, month, amountCents, new Date().toLocaleDateString('sv-SE'), `Mercado Pago renovação automática ${invoice.id}`, String(pay.id)]);
+  [sub.id, month, amountCents, new Date().toLocaleDateString('sv-SE'), `Mercado Pago renovação automática ${ref}`, String(pay.id)]);
   if (!r.rowCount) return false;
 
   if (sub.status !== 'ativo') await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [sub.id]); // foi cobrado: plano ativo
   // o vencimento passa a ser o dia em que o cartão é cobrado
   const day = Math.min(Number(new Date().toLocaleDateString('sv-SE').slice(8, 10)), 28);
   if (sub.due_day !== day) await run('UPDATE subscribers SET due_day = ? WHERE id = ?', [day, sub.id]);
-  notifyPayment({ subscriberId: sub.id, month, orderId: `renovação automática ${invoice.id}`, amountCents, method: 'credito', autopay: true })
+  notifyPayment({ subscriberId: sub.id, month, orderId: `renovação automática ${ref}`, amountCents, method: 'credito', autopay: true })
     .catch((e) => console.error('WhatsApp:', e.message));
   return true;
 }
