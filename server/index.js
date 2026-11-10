@@ -7,7 +7,7 @@ import { publicApi, WA_WEBHOOK_PATH } from './public.js';
 import { memberApi } from './member.js';
 import { authProblems, logout, me, requestCode, requireAuth, verifyCode } from './auth.js';
 import { ensureIncomingWebhook, startNoticeScheduler, whatsappConfigured } from './whatsapp.js';
-import { mpConfigured, syncPendingCheckouts } from './mp.js';
+import { mpConfigured, syncDueAutopays, syncPendingCheckouts } from './mp.js';
 
 // Rede de segurança: um erro inesperado é registrado no log em vez de derrubar o servidor.
 process.on('unhandledRejection', (err) => console.error('Erro não tratado:', err?.message || err));
@@ -75,9 +75,12 @@ app.listen(PORT, HOST, () => {
   if (appUrl.startsWith('https://')) {
     ensureIncomingWebhook(`${appUrl}/api/public${WA_WEBHOOK_PATH}`).catch((e) => console.error('WhatsApp (webhook):', e.message));
   }
-  // Confere pedidos em aberto no Mercado Pago a cada 5 min (não depende do webhook)
+  // Confere pedidos em aberto e cobranças automáticas no Mercado Pago a cada 5 min (não depende do webhook)
   if (mpConfigured) {
-    const sync = () => syncPendingCheckouts().catch((e) => console.error('Mercado Pago (conferência):', e.message));
+    const sync = () => {
+      syncPendingCheckouts().catch((e) => console.error('Mercado Pago (conferência):', e.message));
+      syncDueAutopays().catch((e) => console.error('Mercado Pago (renovação automática):', e.message));
+    };
     setTimeout(sync, 30_000).unref();
     setInterval(sync, 5 * 60_000).unref();
   }

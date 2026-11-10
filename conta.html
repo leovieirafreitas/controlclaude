@@ -123,6 +123,7 @@
           <dl class="facts">
             <div><dt>Assinante desde</dt><dd id="since"></dd></div>
             <div><dt>Vencimento</dt><dd id="due"></dd></div>
+            <div class="hidden" id="autopay-row"><dt>Renovação automática</dt><dd id="autopay"></dd></div>
           </dl>
           <p class="muted small" id="charge-info"></p>
           <div class="actions-row">
@@ -130,6 +131,7 @@
             <button class="btn btn-ghost" id="check-btn">Já paguei, atualizar</button>
           </div>
           <div class="row-links">
+            <button class="link hidden" id="card-btn">Trocar cartão</button>
             <button class="link" id="change-btn">Escolher outro plano</button>
             <button class="link danger" id="cancel-btn">Cancelar plano</button>
           </div>
@@ -199,36 +201,17 @@
     </form>
   </dialog>
 
-  <!-- PAGAMENTO (cartão pelo Card Payment Brick do Mercado Pago, ou Pix) -->
+  <!-- PAGAMENTO: cartão de crédito com renovação automática (Card Payment Brick do Mercado Pago) -->
   <dialog id="pay-dlg">
     <div class="pay-box">
       <button class="close" id="pay-close" aria-label="Fechar">×</button>
-      <p class="eyebrow">Pagamento</p>
+      <p class="eyebrow" id="pay-eyebrow">Pagamento</p>
       <div class="summary"><strong id="pay-plan"></strong><span id="pay-amount"></span></div>
-      <p class="muted small" id="pay-month"></p>
-
-      <div class="tabs" id="pay-tabs" role="tablist">
-        <button type="button" data-method="card" class="active"><span class="pm-slot" data-icon="card"></span>Cartão</button>
-        <button type="button" data-method="pix"><span class="pm-slot" data-icon="pix"></span>Pix</button>
-      </div>
+      <p class="autopay-note" id="pay-month"></p>
 
       <div id="pay-card">
         <div id="cardPaymentBrick_container"></div>
         <p class="form-error hidden" id="card-error"></p>
-      </div>
-
-      <div id="pay-pix" class="hidden">
-        <div id="pix-start">
-          <p class="muted">Gere o código e pague pelo app do seu banco. A confirmação é automática.</p>
-          <button class="btn btn-primary btn-lg btn-block" id="pix-btn">Gerar Pix</button>
-        </div>
-        <div id="pix-show" class="hidden">
-          <img id="pix-qr" alt="QR Code do Pix" width="220" height="220">
-          <label>Pix copia e cola<textarea id="pix-code" rows="3" readonly></textarea></label>
-          <button class="btn btn-outline btn-block" id="pix-copy" type="button">Copiar código</button>
-          <p class="pix-wait"><span class="dot"></span> Aguardando pagamento…</p>
-        </div>
-        <p class="form-error hidden" id="pix-error"></p>
       </div>
 
       <p class="fine lock">🔒 Pagamento processado pelo Mercado Pago. Os dados do cartão não passam pelo nosso servidor.</p>

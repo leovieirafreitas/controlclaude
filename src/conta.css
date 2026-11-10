@@ -170,5 +170,8 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 .pm-icon { width: 15px; height: 15px; flex: none; vertical-align: -2px; }
 .pm-inline { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .pm-inline.m-pix .pm-icon { color: #32bcad; }
-#pay-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
-#pay-tabs button .pm-icon { width: 17px; height: 17px; }
+
+/* pagamento com renovação automática */
+#pay-eyebrow { display: inline-flex; align-items: center; gap: 6px; }
+.autopay-note { font-size: 14px; line-height: 1.5; color: var(--muted); background: var(--bg-alt); border-radius: 10px; padding: 10px 12px; margin: 8px 0 14px; }
+.autopay-note strong { color: inherit; font-weight: 650; }

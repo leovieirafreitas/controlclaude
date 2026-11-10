@@ -54,3 +54,13 @@ export function bindDialogForm(form, onSave) {
     }
   });
 }
+
+/** Selo da renovação automática no cartão (assinatura do Mercado Pago). */
+export function autopayBadge(x) {
+  if (x.autopay_status === 'authorized') {
+    const tip = [x.card_last4 ? `Cartão final ${x.card_last4}` : null, x.next_charge_date ? `próxima cobrança ${fmtDate(String(x.next_charge_date).slice(0, 10))}` : null].filter(Boolean).join(' · ');
+    return ` <span class="badge b-autopay" title="${esc(tip)}">${methodIcon('credito')} Renovação automática</span>`;
+  }
+  if (x.autopay_status === 'paused') return ' <span class="badge b-pausado" title="Pediu cancelamento: cobrança pausada">Renovação pausada</span>';
+  return '';
+}

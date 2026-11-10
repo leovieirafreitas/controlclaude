@@ -142,3 +142,11 @@ update public.customers set email_verified_at = coalesce(email_verified_at, crea
 -- v9: limite de licenças por plano. Vazio (null) = sem limite.
 -- Contam como licença usada as assinaturas "ativo" e "pausado". Atingido o limite, o plano aparece como esgotado.
 alter table public.plans add column if not exists max_licenses integer check (max_licenses is null or max_licenses > 0);
+
+-- v9: renovação automática no cartão (assinatura do Mercado Pago / preapproval)
+alter table public.subscribers add column if not exists mp_preapproval_id text;   -- id da assinatura no Mercado Pago
+alter table public.subscribers add column if not exists autopay_status   text;   -- authorized | paused | cancelled
+alter table public.subscribers add column if not exists card_last4       text;   -- final do cartão (para mostrar)
+alter table public.subscribers add column if not exists card_brand       text;
+alter table public.subscribers add column if not exists next_charge_date date;   -- próxima cobrança automática
+create unique index if not exists idx_subscribers_preapproval on public.subscribers(mp_preapproval_id) where mp_preapproval_id is not null;

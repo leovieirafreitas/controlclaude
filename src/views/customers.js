@@ -1,7 +1,7 @@
 // Aba "Clientes": todas as contas criadas na área do assinante (/conta),
 // com e-mail confirmado ou não e a situação do plano. Atualiza sozinha (ver main.js).
 import { api } from '../api.js';
-import { $, brl, esc, fmtDate } from '../utils.js';
+import { $, brl, esc, fmtDate, autopayBadge } from '../utils.js';
 
 let customers = [];
 const SEEN_KEY = 'cc-customers-seen'; // último cadastro já visto, para a bolinha da aba
@@ -88,7 +88,7 @@ function render() {
         : '<span class="badge b-atrasado">Não confirmado</span>'}</td>
       <td>${c.plan_name ? `${esc(c.plan_name)} <span class="muted">· ${brl(c.price_cents)}</span>` : '<span class="muted">—</span>'}
         ${c.last_paid_at ? `<div class="muted">último pagamento ${fmtDate(c.last_paid_at)}</div>` : ''}</td>
-      <td>${situationBadge(c)}</td>
+      <td>${situationBadge(c)}${autopayBadge(c)}</td>
     </tr>`).join('')
     || `<tr><td colspan="6" class="empty">${customers.length ? 'Nenhum cliente encontrado com esse filtro.' : 'Nenhuma conta criada ainda.'}</td></tr>`;
 }

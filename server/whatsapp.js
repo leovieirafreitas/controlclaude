@@ -1,6 +1,7 @@
 // Avisos no WhatsApp pela Evolution API (v2): para o admin e para o cliente.
 // Nunca bloqueia nem derruba o fluxo principal: se o envio falhar, só registra no log.
 import { all, get, run } from './db.js';
+import { setAutopayStatus } from './mp.js';
 
 const URL = (process.env.EVOLUTION_URL || '').replace(/\/$/, '');
 const INSTANCE = process.env.EVOLUTION_INSTANCE || '';
@@ -84,6 +85,7 @@ const fire = (p) => { Promise.resolve(p).catch(() => {}); };
 async function subscriberInfo(subscriberId) {
   return get(`
     SELECT s.id, s.name, s.email, s.phone, s.birth_date, s.due_day, s.start_date, p.name AS plan_name, p.price_cents,
+           s.card_last4, s.next_charge_date,
            (SELECT COUNT(*) FROM payments WHERE subscriber_id = s.id) AS payments_count
     FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [subscriberId]);
 }
@@ -97,12 +99,13 @@ const contactLines = (s) => [
 // ------------------------------------------------------------------ eventos
 
 /** Pagamento aprovado pelo site: "nova assinatura" no 1º pagamento, "pagamento recebido" nos seguintes. */
-export async function notifyPayment({ subscriberId, month, amountCents, method, orderId }) {
+export async function notifyPayment({ subscriberId, month, amountCents, method, orderId, autopay = false }) {
   if (!canSend) return;
   const s = await subscriberInfo(subscriberId).catch(() => null);
   if (!s) return;
   const first = s.payments_count <= 1;
-  const how = METHOD[method] || method;
+  const how = autopay ? `${METHOD[method] || 'Cartão'} (renovação automática)` : METHOD[method] || method;
+  const card = s.card_last4 ? ` final ${s.card_last4}` : '';
 
   if (whatsappConfigured) {
     fire(notifyAdmin([
@@ -128,15 +131,19 @@ export async function notifyPayment({ subscriberId, month, amountCents, method, 
       `Sua assinatura do *${s.plan_name}* está ativa. Seja bem-vindo(a) à Control Claude!`,
       '',
       `💵 Pagamento de ${brl(amountCents)} via ${how} confirmado (${fmtMonth(month)}).`,
-      `📅 Sua mensalidade vence todo dia ${s.due_day}.`,
-      accountLink() ? `\nNa sua área você vê seus dados, pagamentos e pode pagar as próximas mensalidades:\n${accountLink()}` : null,
+      autopay
+        ? `🔁 A renovação é automática: todo mês, por volta do dia ${s.due_day}, cobramos no seu cartão${card}. Você não precisa fazer nada.`
+        : `📅 Sua mensalidade vence todo dia ${s.due_day}.`,
+      accountLink() ? `\nNa sua área você vê seus dados e pagamentos, troca o cartão ou cancela quando quiser:\n${accountLink()}` : null,
       '',
       'Qualquer dúvida, é só responder esta mensagem.',
     ].filter((l) => l !== null).join('\n')
     : [
       `Olá, ${firstName(s.name)}! ✅`,
       '',
-      `Recebemos seu pagamento de ${brl(amountCents)} via ${how}, referente a ${fmtMonth(month)}.`,
+      autopay
+        ? `A renovação automática do seu plano foi feita: cobramos ${brl(amountCents)} no seu cartão${card}, referente a ${fmtMonth(month)}.`
+        : `Recebemos seu pagamento de ${brl(amountCents)} via ${how}, referente a ${fmtMonth(month)}.`,
       `Seu plano *${s.plan_name}* segue ativo. Obrigado!`,
     ].join('\n')));
 }
@@ -226,6 +233,7 @@ export async function runDailyNotices() {
 
   const subs = await all(`
     SELECT s.id, s.name, s.email, s.phone, s.due_day, s.start_date, p.name AS plan_name, p.price_cents,
+           s.autopay_status, s.card_last4,
            (SELECT MAX(ref_month) FROM payments WHERE subscriber_id = s.id) AS last_paid_month,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_next
@@ -255,7 +263,8 @@ export async function runDailyNotices() {
  */
 async function runCancellations(today) {
   const list = await all(`
-    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, s.retention_answer, p.name AS plan_name, p.price_cents
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, s.retention_answer, p.name AS plan_name, p.price_cents,
+           s.mp_preapproval_id, s.autopay_status
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
     WHERE s.status = 'ativo' AND s.cancel_at IS NOT NULL`);
   for (const s of list) {
@@ -264,6 +273,7 @@ async function runCancellations(today) {
 
     if (daysLeft <= 0) {
       await run("UPDATE subscribers SET status = 'cancelado' WHERE id = ? AND status = 'ativo'", [s.id]);
+      await setAutopayStatus(s, 'cancelled').catch((e) => console.error('Mercado Pago (encerrar renovação):', e.message));
       if (whatsappConfigured && (await claim('fim_acesso', s.id, String(s.cancel_at)))) {
         await notifyAdmin([
           '⛔ *Fim do acesso — desative este cliente*',
@@ -316,7 +326,8 @@ export async function handleIncomingMessage(fromNumber, text) {
   if (!yes && !no) return 'ignorado';
 
   const candidates = await all(`
-    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, p.name AS plan_name, p.price_cents
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, p.name AS plan_name, p.price_cents,
+           s.mp_preapproval_id, s.autopay_status, s.card_last4
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
     WHERE s.status = 'ativo' AND s.cancel_at IS NOT NULL AND s.retention_answer IS NULL
       AND EXISTS (SELECT 1 FROM notifications_sent n WHERE n.kind = 'retencao' AND n.subscriber_id = s.id)`);
@@ -331,11 +342,15 @@ export async function handleIncomingMessage(fromNumber, text) {
     // a próxima mensalidade vence no último dia de acesso: o lembrete já vai nesta resposta
     const month = String(s.cancel_at).slice(0, 7);
     await claim('lembrete', s.id, month);
+    const resumed = await setAutopayStatus(s, 'authorized').catch((e) => { console.error('Mercado Pago (retomar renovação):', e.message); return false; });
+    const autopay = resumed || s.autopay_status === 'authorized';
     await notifyCustomer(s.phone, [
       `Que ótimo, ${firstName(s.name)}! 🎉 Seu plano *${s.plan_name}* continua.`,
       '',
-      `A próxima mensalidade (${brl(s.price_cents)}) vence em *${until}*.`,
-      accountLink() ? `Você pode pagar por Pix ou cartão aqui:\n👉 ${accountLink()}` : null,
+      autopay
+        ? `A renovação automática voltou: em *${until}* cobramos ${brl(s.price_cents)} no seu cartão${s.card_last4 ? ` final ${s.card_last4}` : ''}. Você não precisa fazer nada.`
+        : `A próxima mensalidade (${brl(s.price_cents)}) vence em *${until}*.`,
+      !autopay && accountLink() ? `Ative a renovação automática com seu cartão aqui:\n👉 ${accountLink()}` : null,
     ].filter((l) => l !== null).join('\n'), { force: true });
     if (whatsappConfigured) {
       await notifyAdmin([
@@ -381,6 +396,7 @@ export async function ensureIncomingWebhook(url) {
 async function noticesFor(s, month, daysLeft, due) {
   const value = brl(s.price_cents);
   const plural = (n) => `${n} dia${n > 1 ? 's' : ''}`;
+  if (s.autopay_status === 'authorized') return autopayNoticesFor(s, month, daysLeft, due);
 
   // Cliente: 3 dias antes (ou assim que entrar na janela)
   if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON && (await claim('lembrete', s.id, month))) {
@@ -391,7 +407,7 @@ async function noticesFor(s, month, daysLeft, due) {
         ? `Sua mensalidade do *${s.plan_name}* (${value}) vence *hoje* (${due}).`
         : `Sua mensalidade do *${s.plan_name}* (${value}) vence em *${plural(daysLeft)}*, no dia *${due}*.`,
       '',
-      'O pagamento é feito por você, na sua área do assinante, por *Pix* ou *cartão*. Assim que o pagamento for confirmado, seu plano continua ativo.',
+      'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.',
       accountLink() ? `
 👉 Pagar agora: ${accountLink()}` : null,
       '',
@@ -421,7 +437,7 @@ async function noticesFor(s, month, daysLeft, due) {
         `Olá, ${firstName(s.name)}.`,
         '',
         `Não identificamos o pagamento da mensalidade do *${s.plan_name}* (${value}), que venceu em ${due}.`,
-        accountLink() ? `\nVocê pode pagar agora por Pix ou cartão:\n👉 ${accountLink()}` : null,
+        accountLink() ? `\nVocê pode pagar agora com cartão de crédito:\n👉 ${accountLink()}` : null,
         '',
         'Se já pagou, desconsidere. Qualquer dúvida, é só responder aqui.',
       ].filter((l) => l !== null).join('\n'));
@@ -436,6 +452,58 @@ async function noticesFor(s, month, daysLeft, due) {
         `📅 *Venceu em:* ${due} (${plural(-daysLeft)} de atraso)`,
         `🧾 *Último mês pago:* ${s.last_paid_month ? fmtMonth(s.last_paid_month) : 'nenhum'}`,
         s.phone && CUSTOMER_ON ? '\n_O cliente também recebeu um aviso no WhatsApp._' : null,
+      ].filter((l) => l !== null).join('\n'));
+    }
+  }
+}
+
+/**
+ * Assinante com renovação automática no cartão:
+ *  - cliente: aviso REMINDER_DAYS dias antes de que o cartão será cobrado (não precisa fazer nada);
+ *  - se a cobrança não passar até 2 dias depois do vencimento (o Mercado Pago tenta de novo nesse meio-tempo):
+ *    cliente recebe o link para trocar o cartão e o admin é avisado.
+ */
+async function autopayNoticesFor(s, month, daysLeft, due) {
+  const value = brl(s.price_cents);
+  const card = s.card_last4 ? ` final *${s.card_last4}*` : '';
+
+  if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON && (await claim('lembrete', s.id, month))) {
+    const ok = await notifyCustomer(s.phone, [
+      `Olá, ${firstName(s.name)}! 👋`,
+      '',
+      daysLeft === 0
+        ? `Hoje (${due}) cobramos a mensalidade do *${s.plan_name}* (${value}) no seu cartão${card}.`
+        : `No dia *${due}* vamos cobrar a mensalidade do *${s.plan_name}* (${value}) no seu cartão${card}.`,
+      '',
+      'É automático: você não precisa fazer nada. 😉',
+      accountLink() ? `\nPara trocar o cartão ou ver seus pagamentos: ${accountLink()}` : null,
+    ].filter((l) => l !== null).join('\n'));
+    if (!ok) await unclaim('lembrete', s.id, month);
+  }
+
+  if (daysLeft <= -2) {
+    if (s.phone && CUSTOMER_ON && (await claim('atraso_cliente', s.id, month))) {
+      const ok = await notifyCustomer(s.phone, [
+        `Olá, ${firstName(s.name)}.`,
+        '',
+        `A cobrança automática da mensalidade do *${s.plan_name}* (${value}) no seu cartão${card} *não foi aprovada*.`,
+        'Pode ser limite, cartão vencido ou bloqueado.',
+        accountLink() ? `\nPara não perder o acesso, atualize o cartão aqui:\n👉 ${accountLink()}` : null,
+        '',
+        'Qualquer dúvida, é só responder esta mensagem.',
+      ].filter((l) => l !== null).join('\n'));
+      if (!ok) await unclaim('atraso_cliente', s.id, month);
+    }
+    if (whatsappConfigured && (await claim('atraso_admin', s.id, month))) {
+      await notifyAdmin([
+        '⚠️ *Cobrança automática não passou*',
+        '',
+        ...contactLines(s),
+        `📦 *Plano:* ${s.plan_name} (${value}/mês)`,
+        `💳 *Cartão:*${card || ' —'}`,
+        `📅 *Venceu em:* ${due}`,
+        `🧾 *Último mês pago:* ${s.last_paid_month ? fmtMonth(s.last_paid_month) : 'nenhum'}`,
+        s.phone && CUSTOMER_ON ? '\n_O cliente recebeu o link para trocar o cartão. O Mercado Pago também tenta cobrar de novo._' : null,
       ].filter((l) => l !== null).join('\n'));
     }
   }
@@ -475,7 +543,7 @@ export async function runCheckoutReminders() {
           `Oi, ${firstName(s.name)}! 😊`,
           '',
           `Sua assinatura do *${s.plan_name}* (${value}/mês) ainda está esperando o pagamento para ser ativada.`,
-          link ? `\nÉ rapidinho, por Pix ou cartão:\n👉 ${link}` : null,
+          link ? `\nÉ rapidinho, com cartão de crédito:\n👉 ${link}` : null,
           '',
           'Se tiver qualquer dúvida ou dificuldade para pagar, é só responder esta mensagem que a gente te ajuda.',
         ].filter((l) => l !== null).join('\n'));
@@ -497,7 +565,7 @@ export async function runCheckoutReminders() {
         `Oi, ${firstName(s.name)}! 👋`,
         '',
         `Vi que você escolheu o plano *${s.plan_name}* (${value}/mês), mas o pagamento ainda não foi concluído.`,
-        link ? `\nVocê pode pagar por Pix ou cartão aqui:\n👉 ${link}` : null,
+        link ? `\nVocê pode pagar com cartão de crédito aqui:\n👉 ${link}` : null,
         '',
         'Precisa de ajuda? É só responder esta mensagem.',
       ].filter((l) => l !== null).join('\n'));

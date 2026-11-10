@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { all, get, run } from './db.js';
 import { notifyAdmin, whatsappLogout, whatsappQr, whatsappStatus } from './whatsapp.js';
+import { setAutopayStatus, setAutopayAmount } from './mp.js';
 
 export const api = Router();
 
@@ -159,7 +160,7 @@ api.get('/subscribers', h(() => all(`
 // Contas criadas na área do assinante (/conta): cadastro, e-mail confirmado e situação do plano
 api.get('/customers', h(() => all(`
   SELECT c.id, c.name, c.email, c.phone, c.birth_date, c.created_at, c.email_verified_at,
-         s.id AS subscriber_id, s.status, s.cancel_at, p.name AS plan_name, p.price_cents,
+         s.id AS subscriber_id, s.status, s.cancel_at, s.autopay_status, s.card_last4, s.next_charge_date, p.name AS plan_name, p.price_cents,
          (SELECT MAX(paid_at) FROM payments pay WHERE pay.subscriber_id = s.id) AS last_paid_at
   FROM customers c
   LEFT JOIN LATERAL (SELECT * FROM subscribers WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) s ON true
@@ -174,16 +175,46 @@ api.post('/subscribers', h(async ({ body }) => {
 }));
 
 api.put('/subscribers/:id', h(async ({ body, params }) => {
+  const before = await get('SELECT s.*, p.price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?', [Number(params.id)]);
   await run(`
     UPDATE subscribers SET name = ?, email = ?, phone = ?, plan_id = ?, start_date = ?, due_day = ?, status = ?, notes = ?, birth_date = ?
     WHERE id = ?`, [...(await subscriberValues(body)), Number(params.id)]);
   // Admin mudou o status na mão: um cancelamento agendado antigo deixa de valer
   await run(`UPDATE subscribers SET cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL
              WHERE id = ? AND cancel_at IS NOT NULL AND (status <> 'ativo' OR cancel_at <= current_date)`, [Number(params.id)]);
+  await syncAutopayWithStatus(before, Number(params.id));
   return { ok: true };
 }));
 
+/**
+ * O admin mudou o assinante na mão: a cobrança automática no cartão acompanha.
+ * Cancelado → cancela a cobrança · Pausado → pausa · Ativo (sem cancelamento agendado) → volta a cobrar.
+ * Trocou o plano → a cobrança passa a ter o valor do plano novo.
+ */
+async function syncAutopayWithStatus(before, id) {
+  if (!before?.mp_preapproval_id || before.autopay_status === 'cancelled') return;
+  const sub = await get('SELECT s.*, p.price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?', [id]);
+  const want = sub.status === 'cancelado' ? 'cancelled'
+    : sub.status === 'pausado' ? 'paused'
+    : sub.status === 'ativo' && !sub.cancel_at ? 'authorized' : null;
+  try {
+    if (want) await setAutopayStatus(sub, want);
+    if (sub.price_cents !== before.price_cents && want !== 'cancelled') await setAutopayAmount(sub, sub.price_cents);
+  } catch (err) {
+    console.error('Mercado Pago (renovação automática):', err.message);
+    throw new ApiError(502, 'Assinante salvo, mas não foi possível atualizar a cobrança automática no Mercado Pago. Tente salvar de novo.');
+  }
+}
+
 api.delete('/subscribers/:id', h(async ({ params }) => {
+  // excluir também desliga a cobrança automática no cartão (senão o Mercado Pago continuaria cobrando)
+  const sub = await get('SELECT * FROM subscribers WHERE id = ?', [Number(params.id)]);
+  if (sub?.mp_preapproval_id && sub.autopay_status !== 'cancelled') {
+    await setAutopayStatus(sub, 'cancelled').catch((err) => {
+      console.error('Mercado Pago (renovação automática):', err.message);
+      throw new ApiError(502, 'Não foi possível cancelar a cobrança automática no Mercado Pago. Tente de novo.');
+    });
+  }
   await run('DELETE FROM subscribers WHERE id = ?', [Number(params.id)]);
   return { ok: true };
 }));
