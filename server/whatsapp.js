@@ -12,6 +12,8 @@ const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 // Mensagens para o cliente (boas-vindas, lembrete, atraso). Desligue com WHATSAPP_CUSTOMER_MESSAGES=off
 const CUSTOMER_ON = !/^(off|0|false|nao|não)$/i.test(process.env.WHATSAPP_CUSTOMER_MESSAGES || 'on');
 const REMINDER_DAYS = Math.max(0, Number(process.env.REMINDER_DAYS_BEFORE ?? 3) || 0);
+// Aviso de que o pagamento passa a ser automático no cartão (clientes sem renovação automática), em dias antes do vencimento
+const CARD_NOTICE_DAYS = Math.max(REMINDER_DAYS + 1, Number(process.env.CARD_NOTICE_DAYS_BEFORE ?? 5) || 5);
 // Quantos dias antes do fim do acesso perguntar se o cliente quer continuar
 const RETENTION_DAYS = Math.max(1, Number(process.env.RETENTION_DAYS_BEFORE ?? 3) || 3);
 
@@ -397,6 +399,27 @@ async function noticesFor(s, month, daysLeft, due) {
   const value = brl(s.price_cents);
   const plural = (n) => `${n} dia${n > 1 ? 's' : ''}`;
   if (s.autopay_status === 'authorized') return autopayNoticesFor(s, month, daysLeft, due);
+
+  // Cliente ainda sem renovação automática (pagava por Pix ou cartão avulso): 5 dias antes do vencimento,
+  // avisa que a partir desta mensalidade o pagamento passa a ser automático no cartão de crédito.
+  if (daysLeft > REMINDER_DAYS && daysLeft <= CARD_NOTICE_DAYS && s.phone && CUSTOMER_ON && (await claim('aviso_cartao', s.id, month))) {
+    const ok = await notifyCustomer(s.phone, [
+      `Olá, ${firstName(s.name)}! 👋`,
+      '',
+      `Um aviso rápido sobre a sua assinatura do *${s.plan_name}*:`,
+      '',
+      `A partir da próxima mensalidade (${due}), o pagamento passa a ser *automático no cartão de crédito*. Você cadastra o cartão uma vez e todo mês a cobrança acontece sozinha, sem precisar lembrar de pagar.`,
+      '',
+      accountLink()
+        ? `Uns dias antes do vencimento te mandamos o link para cadastrar o cartão. Se preferir, já pode fazer isso agora na sua área:\n👉 ${accountLink()}`
+        : 'Uns dias antes do vencimento te mandamos o link para cadastrar o cartão.',
+      '',
+      'Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do mês pago.',
+      '',
+      'Qualquer dúvida, é só responder esta mensagem.',
+    ].join('\n'));
+    if (!ok) await unclaim('aviso_cartao', s.id, month);
+  }
 
   // Cliente: 3 dias antes (ou assim que entrar na janela)
   if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON && (await claim('lembrete', s.id, month))) {
