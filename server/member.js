@@ -11,7 +11,7 @@ import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, planSoldOut } fr
 import { EMAIL_RE, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
 import { notifyCancel, notifyKeep, notifySignup, notifyCardRejected } from './whatsapp.js';
-import { mpConfigured, MP_PUBLIC_KEY, payWithCard, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay } from './mp.js';
+import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay } from './mp.js';
 
 // Assinaturas nesses status já ocupam uma licença do plano: podem pagar mesmo com o plano esgotado.
 const HOLDS_LICENSE = ['ativo', 'pausado'];
@@ -20,6 +20,8 @@ const SOLD_OUT_MSG = 'Este plano está esgotado no momento. Escolha outro plano 
 export const memberApi = Router();
 // Versão dos Termos de uso / Política de privacidade (mude junto com a data nas páginas termos.html e privacidade.html)
 const TERMS_VERSION = '2026-11-09';
+// Pix como alternativa ao cartão com renovação automática (pago mês a mês). Desligar: PIX_ENABLED=off no .env
+export const PIX_ENABLED = !/^(off|0|false|nao|não)$/i.test(process.env.PIX_ENABLED || 'on');
 // Depois de uma renovação automática recusada, espera 7 dias antes de tentar de novo (tentativas seguidas pioram o antifraude)
 const AUTOPAY_RETRY_MS = 7 * 24 * 3600_000;
 export const memberSession = makeSession({ cookie: 'msid', maxAgeMs: 30 * 24 * 3600_000, sameSite: 'lax' });
@@ -282,6 +284,7 @@ async function memberViewByEmail(email) {
     payments: sub ? payments : [],
     plans,
     can_pay: mpConfigured,
+    pix_enabled: mpConfigured && PIX_ENABLED,
     mp_public_key: mpConfigured ? MP_PUBLIC_KEY : null,
   };
 }
@@ -347,12 +350,17 @@ memberApi.post('/subscribe', h(async (req) => {
  */
 memberApi.post('/pay', h(mpSafe(async (req) => {
   if (!mpConfigured) throw new ApiError(503, 'Pagamento online indisponível no momento.');
-  if (req.body?.method === 'pix') throw new ApiError(400, 'O pagamento é só por cartão de crédito, com renovação automática.');
+  if (req.body?.method === 'pix' && !PIX_ENABLED) throw new ApiError(400, 'O pagamento é só por cartão de crédito, com renovação automática.');
   const c = await currentCustomer(req);
   const sub = await requireSubscription(c);
   const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
   if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
+  // Pix: paga a mensalidade em aberto (sem renovação automática; o cliente paga mês a mês)
+  if (req.body?.method === 'pix') {
+    const month = await billingMonth(sub, plan.price_cents);
+    return { pix: await payWithPix({ ...sub, email: c.email }, plan, month), amount_cents: plan.price_cents };
+  }
   const card = req.body?.card || {};
   if (!card.token || !card.payment_method_id) throw new ApiError(400, 'Dados do cartão incompletos.');
   if (card.payment_type_id && card.payment_type_id !== 'credit_card') {

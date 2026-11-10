@@ -341,7 +341,7 @@ function render(data) {
       : failed ? 'Pagar com outro cartão'
       : cancelled ? 'Reativar plano'
       : next.current_paid ? 'Ativar renovação automática'
-      : `Assinar com cartão de crédito`;
+      : state.pix_enabled ? `Pagar ${fmtMonth(next.month)}` : `Assinar com cartão de crédito`;
     $('#charge-info').textContent = cancelled
       ? 'Seu plano está cancelado. Você não será mais cobrado.'
       : scheduled ? 'Cancelamento agendado: nenhuma nova cobrança será feita.'
@@ -350,7 +350,9 @@ function render(data) {
       : next.current_paid
         ? 'Sua mensalidade deste mês está paga. Ative a renovação automática para não se preocupar com o vencimento.'
         : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
-        : `Mensalidade de ${fmtMonth(next.month)} em aberto. O pagamento é no cartão de crédito, com renovação automática todo mês.`;
+        : state.pix_enabled
+          ? `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague com cartão de crédito (renovação automática todo mês) ou Pix.`
+          : `Mensalidade de ${fmtMonth(next.month)} em aberto. O pagamento é no cartão de crédito, com renovação automática todo mês.`;
   }
 
   $('#payments-card').classList.toggle('hidden', !sub);
@@ -365,6 +367,7 @@ function render(data) {
 
 let mpInstance = null;
 let brickController = null;
+let pixTimer = null;
 let payMode = 'pay'; // 'pay' = assinar com renovação automática · 'card' = só trocar o cartão · 'once' = plano B: este mês avulso
 
 /** Escolhe o plano (cria/atualiza a assinatura) e abre o pagamento. */
@@ -434,6 +437,7 @@ async function mountBrick() {
             $('#pay-month').innerHTML = `<strong>${esc(out.message)}</strong><br>
               Sem problema: você pode pagar <strong>este mês (${price})</strong> normalmente no cartão. Digite os dados do cartão de novo abaixo.
               No próximo vencimento, tentamos ativar a renovação automática outra vez.`;
+            cardNote = $('#pay-month').innerHTML;
             $('#card-error').classList.add('hidden');
             await mountBrick();
           } else {
@@ -469,7 +473,15 @@ function openPayment(mode = 'pay') {
          No próximo vencimento, tentamos ativar a renovação automática outra vez.`
     : `Cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, neste cartão.
        Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do período pago, sem estorno.`;
+  cardNote = $('#pay-month').innerHTML;
   $('#card-error').classList.add('hidden');
+  // Pix (mês a mês) como alternativa, menos na troca de cartão
+  $('#pay-tabs').classList.toggle('hidden', !(state.pix_enabled && mode !== 'card'));
+  $('#pix-error').classList.add('hidden');
+  $('#pix-start').classList.remove('hidden');
+  $('#pix-show').classList.add('hidden');
+  stopPix();
+  payMethod('card');
   $('#pay-dlg').showModal();
   mountBrick().catch((err) => {
     console.error(err);
@@ -478,13 +490,75 @@ function openPayment(mode = 'pay') {
   });
 }
 
+let cardNote = '';
+function payMethod(method) {
+  document.querySelectorAll('#pay-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
+  $('#pay-card').classList.toggle('hidden', method !== 'card');
+  $('#pay-pix').classList.toggle('hidden', method !== 'pix');
+  const sub = state.subscription;
+  $('#pay-month').innerHTML = method === 'pix'
+    ? `Pix de <strong>${brl(sub.plan.price_cents)}</strong> referente à mensalidade de ${fmtMonth(sub.next_charge.month)}.
+       Com Pix, <strong>você paga todo mês</strong> (avisamos pelo WhatsApp antes do vencimento). Prefere não se preocupar? Use o cartão com renovação automática.`
+    : cardNote;
+}
+
+function stopPix() {
+  clearInterval(pixTimer);
+  pixTimer = null;
+}
+
 function closePayment() {
+  stopPix();
   unmountBrick();
   if ($('#pay-dlg').open) $('#pay-dlg').close();
 }
 
+document.querySelectorAll('.pm-slot').forEach((el) => { el.outerHTML = methodIcon(el.dataset.icon); }); // ícones nas abas
+document.querySelectorAll('#pay-tabs button').forEach((b) => b.addEventListener('click', () => payMethod(b.dataset.method)));
 $('#pay-close').addEventListener('click', closePayment);
-$('#pay-dlg').addEventListener('cancel', () => { unmountBrick(); });
+$('#pay-dlg').addEventListener('cancel', () => { stopPix(); unmountBrick(); });
+
+$('#pix-btn').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = 'Gerando…';
+  $('#pix-error').classList.add('hidden');
+  try {
+    const { pix } = await call('/pay', { method: 'POST', body: { method: 'pix' } });
+    if (pix.qr_code_base64) $('#pix-qr').src = `data:image/png;base64,${pix.qr_code_base64}`;
+    $('#pix-qr').classList.toggle('hidden', !pix.qr_code_base64);
+    $('#pix-code').value = pix.qr_code || '';
+    $('#pix-start').classList.add('hidden');
+    $('#pix-show').classList.remove('hidden');
+    // confere a cada 5 s (até 30 min) se o Pix foi pago
+    const started = Date.now();
+    const paidBefore = state.payments.length;
+    stopPix();
+    pixTimer = setInterval(async () => {
+      if (Date.now() - started > 30 * 60_000) return stopPix();
+      try {
+        const data = await call('/sync', { method: 'POST', body: { order_id: pix.order_id } });
+        if (data.payments.length > paidBefore) {
+          closePayment();
+          render(data);
+          flash('Pix recebido! Seu plano está ativo.', 'ok');
+        }
+      } catch { /* tenta de novo no próximo ciclo */ }
+    }, 5000);
+  } catch (err) {
+    $('#pix-error').textContent = err.message;
+    $('#pix-error').classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Gerar Pix';
+  }
+});
+
+$('#pix-copy').addEventListener('click', async (e) => {
+  try { await navigator.clipboard.writeText($('#pix-code').value); } catch { $('#pix-code').select(); document.execCommand('copy'); }
+  e.currentTarget.textContent = 'Copiado!';
+  setTimeout(() => { e.currentTarget.textContent = 'Copiar código'; }, 1800);
+});
 
 $('#mini-plans').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-plan]');

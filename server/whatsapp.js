@@ -13,6 +13,9 @@ const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 const CUSTOMER_ON = !/^(off|0|false|nao|não)$/i.test(process.env.WHATSAPP_CUSTOMER_MESSAGES || 'on');
 const REMINDER_DAYS = Math.max(0, Number(process.env.REMINDER_DAYS_BEFORE ?? 3) || 0);
 // Aviso de que o pagamento passa a ser automático no cartão (clientes sem renovação automática), em dias antes do vencimento
+// Pix como alternativa ao cartão (mesma chave do member.js): muda os textos dos lembretes
+const PIX_ON = !/^(off|0|false|nao|não)$/i.test(process.env.PIX_ENABLED || 'on');
+const PAY_HOW = PIX_ON ? 'cartão de crédito ou Pix' : 'cartão de crédito';
 const CARD_NOTICE_DAYS = Math.max(REMINDER_DAYS + 1, Number(process.env.CARD_NOTICE_DAYS_BEFORE ?? 5) || 5);
 // Quantos dias antes do fim do acesso perguntar se o cliente quer continuar
 const RETENTION_DAYS = Math.max(1, Number(process.env.RETENTION_DAYS_BEFORE ?? 3) || 3);
@@ -371,7 +374,7 @@ export async function handleIncomingMessage(fromNumber, text) {
       autopay
         ? `A renovação automática voltou: em *${until}* cobramos ${brl(s.price_cents)} no seu cartão${s.card_last4 ? ` final ${s.card_last4}` : ''}. Você não precisa fazer nada.`
         : `A próxima mensalidade (${brl(s.price_cents)}) vence em *${until}*.`,
-      !autopay && accountLink() ? `Ative a renovação automática com seu cartão aqui:\n👉 ${accountLink()}` : null,
+      !autopay && accountLink() ? `Você pode pagar com ${PAY_HOW} aqui:\n👉 ${accountLink()}` : null,
     ].filter((l) => l !== null).join('\n'), { force: true });
     if (whatsappConfigured) {
       await notifyAdmin([
@@ -427,11 +430,13 @@ async function noticesFor(s, month, daysLeft, due) {
       '',
       `Um aviso rápido sobre a sua assinatura do *${s.plan_name}*:`,
       '',
-      `A partir da próxima mensalidade (${due}), o pagamento passa a ser *automático no cartão de crédito*. Você cadastra o cartão uma vez e todo mês a cobrança acontece sozinha, sem precisar lembrar de pagar.`,
+      PIX_ON
+        ? `Novidade: a partir da próxima mensalidade (${due}) você pode ativar a *renovação automática no cartão de crédito*. Cadastra o cartão uma vez e todo mês a cobrança acontece sozinha, sem precisar lembrar de pagar. Se preferir, pode continuar pagando por *Pix* normalmente.`
+        : `A partir da próxima mensalidade (${due}), o pagamento passa a ser *automático no cartão de crédito*. Você cadastra o cartão uma vez e todo mês a cobrança acontece sozinha, sem precisar lembrar de pagar.`,
       '',
       accountLink()
-        ? `Uns dias antes do vencimento te mandamos o link para cadastrar o cartão. Se preferir, já pode fazer isso agora na sua área:\n👉 ${accountLink()}`
-        : 'Uns dias antes do vencimento te mandamos o link para cadastrar o cartão.',
+        ? `Uns dias antes do vencimento te mandamos o link para pagar. Se preferir, já pode fazer isso agora na sua área:\n👉 ${accountLink()}`
+        : 'Uns dias antes do vencimento te mandamos o link para pagar.',
       '',
       'Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do mês pago.',
       '',
@@ -449,7 +454,9 @@ async function noticesFor(s, month, daysLeft, due) {
         ? `Sua mensalidade do *${s.plan_name}* (${value}) vence *hoje* (${due}).`
         : `Sua mensalidade do *${s.plan_name}* (${value}) vence em *${plural(daysLeft)}*, no dia *${due}*.`,
       '',
-      'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.',
+      PIX_ON
+        ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
+        : 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.',
       accountLink() ? `
 👉 Pagar agora: ${accountLink()}` : null,
       '',
@@ -479,7 +486,7 @@ async function noticesFor(s, month, daysLeft, due) {
         `Olá, ${firstName(s.name)}.`,
         '',
         `Não identificamos o pagamento da mensalidade do *${s.plan_name}* (${value}), que venceu em ${due}.`,
-        accountLink() ? `\nVocê pode pagar agora com cartão de crédito:\n👉 ${accountLink()}` : null,
+        accountLink() ? `\nVocê pode pagar agora com ${PAY_HOW}:\n👉 ${accountLink()}` : null,
         '',
         'Se já pagou, desconsidere. Qualquer dúvida, é só responder aqui.',
       ].filter((l) => l !== null).join('\n'));
@@ -585,7 +592,7 @@ export async function runCheckoutReminders() {
           `Oi, ${firstName(s.name)}! 😊`,
           '',
           `Sua assinatura do *${s.plan_name}* (${value}/mês) ainda está esperando o pagamento para ser ativada.`,
-          link ? `\nÉ rapidinho, com cartão de crédito:\n👉 ${link}` : null,
+          link ? `\nÉ rapidinho, com ${PAY_HOW}:\n👉 ${link}` : null,
           '',
           'Se tiver qualquer dúvida ou dificuldade para pagar, é só responder esta mensagem que a gente te ajuda.',
         ].filter((l) => l !== null).join('\n'));
@@ -607,7 +614,7 @@ export async function runCheckoutReminders() {
         `Oi, ${firstName(s.name)}! 👋`,
         '',
         `Vi que você escolheu o plano *${s.plan_name}* (${value}/mês), mas o pagamento ainda não foi concluído.`,
-        link ? `\nVocê pode pagar com cartão de crédito aqui:\n👉 ${link}` : null,
+        link ? `\nVocê pode pagar com ${PAY_HOW} aqui:\n👉 ${link}` : null,
         '',
         'Precisa de ajuda? É só responder esta mensagem.',
       ].filter((l) => l !== null).join('\n'));
