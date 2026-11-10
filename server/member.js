@@ -20,6 +20,8 @@ const SOLD_OUT_MSG = 'Este plano está esgotado no momento. Escolha outro plano 
 export const memberApi = Router();
 // Versão dos Termos de uso / Política de privacidade (mude junto com a data nas páginas termos.html e privacidade.html)
 const TERMS_VERSION = '2026-11-09';
+// Depois de uma renovação automática recusada, espera 7 dias antes de tentar de novo (tentativas seguidas pioram o antifraude)
+const AUTOPAY_RETRY_MS = 7 * 24 * 3600_000;
 export const memberSession = makeSession({ cookie: 'msid', maxAgeMs: 30 * 24 * 3600_000, sameSite: 'lax' });
 
 // ------------------------------------------------------------------ helpers
@@ -266,6 +268,9 @@ async function memberViewByEmail(email) {
         sold_out: sub.plan_sold_out && !HOLDS_LICENSE.includes(sub.status) },
       next_charge: { month: next, current_paid: next !== month },
       // renovação automática no cartão (assinatura do Mercado Pago)
+      // renovação automática recusada há menos de 7 dias: a tela vai direto para o pagamento avulso do mês
+      autopay_blocked: Boolean(sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS
+        && !(sub.mp_preapproval_id && sub.autopay_status === 'authorized')),
       autopay: sub.mp_preapproval_id && sub.autopay_status !== 'cancelled'
         ? { status: sub.autopay_status, card_last4: sub.card_last4, card_brand: sub.card_brand, next_charge_date: sub.next_charge_date }
         : null,
@@ -357,7 +362,8 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
 
   // Plano B: o Mercado Pago recusou a renovação automática → paga este mês de forma avulsa no cartão.
   // No próximo vencimento o cliente é convidado de novo a ligar a renovação automática.
-  if (req.body?.mode === 'once') {
+  const blocked = sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
+  if (req.body?.mode === 'once' || blocked) {
     if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
     const month = await billingMonth(sub, plan.price_cents);
     const result = await payWithCard({ ...sub, email: c.email }, plan, month, card, deviceId);
@@ -366,7 +372,12 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   }
 
   const result = await startAutopay({ ...sub, email: c.email }, plan, card, deviceId);
-  if (result.status === 'rejected') notifyCardRejected(sub.id, { once: false, message: result.reason || result.message });
+  if (result.status === 'rejected') {
+    await run('UPDATE subscribers SET autopay_failed_at = now() WHERE id = ?', [sub.id]);
+    notifyCardRejected(sub.id, { once: false, message: result.reason || result.message });
+  } else {
+    await run('UPDATE subscribers SET autopay_failed_at = NULL WHERE id = ?', [sub.id]);
+  }
   return { ...result, view: await memberView(c) };
 })));
 

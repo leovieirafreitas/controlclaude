@@ -150,3 +150,6 @@ alter table public.subscribers add column if not exists card_last4       text;  
 alter table public.subscribers add column if not exists card_brand       text;
 alter table public.subscribers add column if not exists next_charge_date date;   -- próxima cobrança automática
 create unique index if not exists idx_subscribers_preapproval on public.subscribers(mp_preapproval_id) where mp_preapproval_id is not null;
+
+-- v10: renovação automática recusada → por 7 dias o site vai direto para o pagamento avulso (evita repetir recusas no antifraude)
+alter table public.subscribers add column if not exists autopay_failed_at timestamptz;
