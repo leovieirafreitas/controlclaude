@@ -153,3 +153,6 @@ create unique index if not exists idx_subscribers_preapproval on public.subscrib
 
 -- v10: renovação automática recusada → por 7 dias o site vai direto para o pagamento avulso (evita repetir recusas no antifraude)
 alter table public.subscribers add column if not exists autopay_failed_at timestamptz;
+
+-- v11: assinatura pelo link do Mercado Pago (o cliente autoriza na página do MP); id do link ainda não concluído
+alter table public.subscribers add column if not exists mp_preapproval_pending text;

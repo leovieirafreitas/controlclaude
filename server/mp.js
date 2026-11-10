@@ -350,31 +350,105 @@ export async function changeAutopayCard(sub, card) {
   return { status: 'approved', message: 'Cartão atualizado! As próximas cobranças serão feitas nele.' };
 }
 
+// ------------------------------------------------------------------ assinatura pelo link do Mercado Pago
+//
+// Fluxo recomendado pelo Mercado Pago: o site cria a assinatura "pendente" e manda o cliente para a página
+// do Mercado Pago (init_point). Lá ele entra na conta dele (ou paga sem conta), autoriza o cartão e paga o
+// 1º mês. O antifraude tem muito mais informação nesse fluxo (conta, histórico, aparelho) e aprova mais.
+// Quando a assinatura fica "authorized", ela passa a ser a renovação automática do assinante.
+
+const enc = encodeURIComponent;
+const ymd = (v) => (v ? String(v).slice(0, 10) : null);
+
+/** Cria (ou reaproveita) o link de assinatura do Mercado Pago para o assinante. Retorna a URL. */
+export async function createAutopayLink(sub, plan) {
+  const amount = Number(money(plan.price_cents));
+  if (sub.mp_preapproval_pending) {
+    const old = await mp(`/preapproval/${enc(sub.mp_preapproval_pending)}`).catch(() => null);
+    const fresh = old && Date.now() - new Date(old.date_created).getTime() < 24 * 3600_000;
+    if (old?.status === 'pending' && fresh && Number(old.auto_recurring?.transaction_amount) === amount && old.init_point) return old.init_point;
+  }
+  const pre = await mp('/preapproval', {
+    method: 'POST',
+    body: {
+      reason: `${plan.name} — Control Claude`,
+      external_reference: `sub_${sub.id}`,
+      // MP_TEST_PAYER_EMAIL: só no .env de teste (o sandbox exige o e-mail do comprador de teste)
+      payer_email: process.env.MP_TEST_PAYER_EMAIL || sub.email,
+      status: 'pending',
+      back_url: `${BACK_URL}?assinatura=retorno`,
+      auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: amount, currency_id: 'BRL' },
+    },
+  });
+  await run('UPDATE subscribers SET mp_preapproval_pending = ? WHERE id = ?', [pre.id, sub.id]);
+  return pre.init_point;
+}
+
+/**
+ * Assinatura do Mercado Pago → assinante (pela referência sub_<id>).
+ * Se ela foi autorizada e ainda não é a renovação automática dele, passa a ser (a antiga, se houver, é cancelada).
+ * Retorna o assinante a conferir, ou null se não há nada a fazer.
+ */
+async function adoptPreapproval(pre) {
+  const m = /^sub_(\d+)$/.exec(pre?.external_reference || '');
+  if (!m) return null;
+  const sub = await get('SELECT * FROM subscribers WHERE id = ?', [Number(m[1])]);
+  if (!sub) return null;
+  if (sub.mp_preapproval_id === pre.id) return sub;
+  if (pre.status !== 'authorized') return null;
+
+  if (sub.mp_preapproval_id && sub.autopay_status !== 'cancelled') {
+    await mp(`/preapproval/${enc(sub.mp_preapproval_id)}`, { method: 'PUT', body: { status: 'cancelled' } })
+      .catch((e) => console.error('Mercado Pago (assinatura antiga):', e.message));
+  }
+  await run(`UPDATE subscribers SET mp_preapproval_id = ?, autopay_status = 'authorized', mp_preapproval_pending = NULL,
+             card_last4 = NULL, card_brand = ?, next_charge_date = ?, autopay_failed_at = NULL,
+             cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL WHERE id = ?`,
+  [pre.id, pre.payment_method_id || null, ymd(pre.next_payment_date), sub.id]);
+  console.log(`Renovação automática ativada pelo link do Mercado Pago (assinante ${sub.id})`);
+  return { ...sub, mp_preapproval_id: pre.id, autopay_status: 'authorized', card_last4: null };
+}
+
+/** Confere o link de assinatura ainda não concluído do assinante. Retorna quantas cobranças registrou. */
+export async function checkPendingAutopay(sub) {
+  if (!sub?.mp_preapproval_pending || !mpConfigured) return 0;
+  const pre = await mp(`/preapproval/${enc(sub.mp_preapproval_pending)}`);
+  const adopted = await adoptPreapproval(pre);
+  if (adopted) return syncAutopay(adopted);
+  // link abandonado há mais de 3 dias (ou cancelado): esquece
+  if (pre.status !== 'pending' || Date.now() - new Date(pre.date_created).getTime() > 3 * 86400_000) {
+    await run('UPDATE subscribers SET mp_preapproval_pending = NULL WHERE id = ? AND mp_preapproval_pending = ?', [sub.id, pre.id]);
+  }
+  return 0;
+}
+
 /** Webhook de assinatura: id da assinatura (preapproval) ou de uma cobrança (authorized_payment). */
 export async function syncAutopayNotification(type, id) {
   let preapprovalId = id;
   if (type === 'subscription_authorized_payment') {
-    const invoice = await mp(`/authorized_payments/${encodeURIComponent(id)}`);
+    const invoice = await mp(`/authorized_payments/${enc(id)}`);
     preapprovalId = invoice.preapproval_id;
   }
   if (!preapprovalId) return 0;
-  const sub = await get('SELECT * FROM subscribers WHERE mp_preapproval_id = ?', [String(preapprovalId)]);
+  const pre = await mp(`/preapproval/${enc(preapprovalId)}`);
+  const sub = await adoptPreapproval(pre);
   return sub ? syncAutopay(sub) : 0;
 }
 
-/** Rede de segurança: confere as renovações automáticas perto (ou depois) da data de cobrança. */
+/** Rede de segurança: links de assinatura em aberto e renovações perto (ou depois) da data de cobrança. */
 export async function syncDueAutopays() {
   if (!mpConfigured) return 0;
+  let added = 0;
+  const pending = await all('SELECT * FROM subscribers WHERE mp_preapproval_pending IS NOT NULL');
+  for (const sub of pending) added += await checkPendingAutopay(sub).catch((e) => { console.error('Link de assinatura:', e.message); return 0; });
   const subs = await all(`
     SELECT * FROM subscribers
     WHERE mp_preapproval_id IS NOT NULL AND autopay_status = 'authorized'
       AND (next_charge_date IS NULL OR next_charge_date <= current_date + 1 OR card_last4 IS NULL)`);
-  let added = 0;
   for (const sub of subs) added += await syncAutopay(sub).catch((e) => { console.error('Renovação automática:', e.message); return 0; });
   if (added) console.log(`Mercado Pago: ${added} cobrança(s) automática(s) registrada(s)`);
   return added;
 }
-
 
 /**
  * Rede de segurança (funciona mesmo sem webhook): confere no Mercado Pago os pedidos
