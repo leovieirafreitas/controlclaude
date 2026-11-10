@@ -284,6 +284,8 @@ label.check input { width: auto; }
 .wa-qr { width: 264px; height: 264px; border-radius: 12px; background: #fff; padding: 8px; border: 1px solid var(--border); }
 .wa-qr-empty { display: grid; place-items: center; color: #6b6b66; }
 .wa-steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; flex: 1; min-width: 220px; }
+.wa-pacing { max-width: 720px; }
+.wa-pacing label.check { align-self: start; padding-bottom: 0; }
 .wa-card code { font-size: 12px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 
 /* topo: e-mail do admin some em telas médias para caber todas as abas numa linha */

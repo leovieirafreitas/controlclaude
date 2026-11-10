@@ -192,6 +192,31 @@
           <h3>Conexão dos avisos (Evolution API)</h3>
           <div id="wa-status"><p class="muted">Verificando conexão…</p></div>
         </div>
+
+        <form id="form-pacing" class="card settings wa-pacing" novalidate>
+          <div class="settings-head">
+            <div>
+              <h3>Intervalo entre os avisos automáticos</h3>
+              <p class="muted">Evita bloqueio do WhatsApp: os avisos programados para clientes (aviso do cartão 5 dias antes, lembretes, atraso, quem não concluiu o pagamento) saem um de cada vez, com uma pausa sorteada entre eles. Confirmações de pagamento e códigos continuam saindo na hora.</p>
+            </div>
+            <button class="btn primary">Salvar</button>
+          </div>
+          <label class="check"><input type="checkbox" name="on"> Ativar intervalo entre os envios</label>
+          <div class="row2">
+            <label>Pausa mínima entre mensagens (segundos)<input name="gap_min" type="number" min="5" max="3600" step="1" inputmode="numeric"></label>
+            <label>Pausa máxima entre mensagens (segundos)<input name="gap_max" type="number" min="5" max="3600" step="1" inputmode="numeric"></label>
+          </div>
+          <div class="row2">
+            <label>Máximo de mensagens por hora<input name="per_hour" type="number" min="1" max="200" step="1" inputmode="numeric"></label>
+            <label>Máximo de mensagens por dia<input name="per_day" type="number" min="1" max="1000" step="1" inputmode="numeric"></label>
+          </div>
+          <div class="row2">
+            <label>Enviar a partir de (hora)<input name="hour_start" type="number" min="0" max="23" step="1" inputmode="numeric"></label>
+            <label>Parar de enviar às (hora)<input name="hour_end" type="number" min="1" max="24" step="1" inputmode="numeric"></label>
+          </div>
+          <p class="muted small" id="pacing-status"></p>
+          <p class="muted small">O que passar do limite não se perde: sai na próxima rodada (de hora em hora), dentro do horário.</p>
+        </form>
       </section>
     </main>
   </div>

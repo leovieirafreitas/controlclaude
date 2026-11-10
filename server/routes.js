@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { all, get, run } from './db.js';
-import { notifyAdmin, whatsappLogout, whatsappQr, whatsappStatus } from './whatsapp.js';
+import { notifyAdmin, pacingStatus, savePacing, whatsappLogout, whatsappQr, whatsappStatus } from './whatsapp.js';
 import { setAutopayStatus, setAutopayAmount } from './mp.js';
 
 export const api = Router();
@@ -344,6 +344,13 @@ api.post('/whatsapp/logout', h(evoSafe(async () => {
   await whatsappLogout();
   return whatsappStatus();
 })));
+// Intervalo entre os avisos programados para clientes (anti-bloqueio do WhatsApp)
+api.get('/whatsapp/pacing', h(() => pacingStatus()));
+api.put('/whatsapp/pacing', h(async ({ body }) => {
+  await savePacing(body || {});
+  return pacingStatus();
+}));
+
 api.post('/whatsapp/test', h(evoSafe(async () => {
   const st = await whatsappStatus();
   if (st.state !== 'open') throw new ApiError(400, 'O WhatsApp está desconectado. Conecte pelo QR Code primeiro.');
