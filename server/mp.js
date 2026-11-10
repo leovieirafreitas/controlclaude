@@ -22,13 +22,16 @@ class MpError extends Error {
   }
 }
 
-async function mp(path, { method = 'GET', body } = {}) {
+// deviceId: identificação do aparelho gerada pelo script de segurança do Mercado Pago (security.js)
+// na área do assinante. Ajuda o antifraude a aprovar (menos recusas "cc_rejected_high_risk").
+async function mp(path, { method = 'GET', body, deviceId } = {}) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${TOKEN}`,
       'Content-Type': 'application/json',
       ...(method === 'POST' ? { 'X-Idempotency-Key': crypto.randomUUID() } : {}),
+      ...(deviceId ? { 'X-meli-session-id': deviceId } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -53,10 +56,10 @@ const REJECT_MSG = {
   cc_rejected_bad_filled_date: 'Data de validade inválida.',
   call_for_authorize: 'O banco pediu autorização. Ligue para o seu banco e tente de novo.',
   cc_rejected_call_for_authorize: 'O banco pediu autorização. Ligue para o seu banco e tente de novo.',
-  rejected_high_risk: 'Pagamento recusado pela análise de segurança. Tente outro cartão ou o Pix.',
-  cc_rejected_high_risk: 'Pagamento recusado pela análise de segurança. Tente outro cartão ou o Pix.',
+  rejected_high_risk: 'O Mercado Pago recusou o pagamento na análise de segurança. Fale com a gente no WhatsApp que ajudamos você.',
+  cc_rejected_high_risk: 'O Mercado Pago recusou o pagamento na análise de segurança. Fale com a gente no WhatsApp que ajudamos você.',
 };
-const rejectMessage = (detail) => REJECT_MSG[detail] || 'O pagamento foi recusado. Confira os dados ou tente outro cartão ou o Pix.';
+const rejectMessage = (detail) => REJECT_MSG[detail] || 'O pagamento foi recusado. Confira os dados do cartão ou tente outro cartão de crédito.';
 
 function firstPayment(order) {
   return (order?.transactions?.payments || [])[0] || {};
@@ -110,7 +113,7 @@ async function saveCheckout(sub, month, order, amountCents) {
  * { token, payment_method_id, payment_type_id?, installments, payer: { email, identification } }
  * Retorna { status: 'approved' | 'pending' | 'rejected', message }
  */
-export async function payWithCard(sub, plan, month, card) {
+export async function payWithCard(sub, plan, month, card, deviceId) {
   const type = card.payment_type_id || (String(card.payment_method_id).startsWith('deb') ? 'debit_card' : 'credit_card');
   const identification = card.payer?.identification?.number
     ? { type: card.payer.identification.type || 'CPF', number: String(card.payer.identification.number).replace(/\D/g, '') }
@@ -119,6 +122,7 @@ export async function payWithCard(sub, plan, month, card) {
   try {
     order = await mp('/v1/orders', {
       method: 'POST',
+      deviceId,
       body: {
         type: 'online',
         processing_mode: 'automatic',
@@ -210,7 +214,7 @@ const autopayReject = (err) => {
   if (/CC_VAL_433|rejected|card_token|Invalid_payment_method|Unsupported_credit_card/i.test(msg)) {
     return /Unsupported_credit_card|Invalid_payment_method/i.test(msg)
       ? 'Este cartão não aceita cobrança mensal automática. Tente outro cartão de crédito.'
-      : 'O cartão foi recusado. Confira os dados ou tente outro cartão de crédito.';
+      : 'O Mercado Pago não aprovou a renovação automática neste cartão agora.';
   }
   return null;
 };
@@ -290,11 +294,12 @@ export async function syncAutopay(sub) {
  * Se já existe uma assinatura no Mercado Pago, ela é substituída (o cartão novo passa a valer).
  * Retorna { status: 'approved' | 'pending' | 'rejected', message }.
  */
-export async function startAutopay(sub, plan, card) {
+export async function startAutopay(sub, plan, card, deviceId) {
   let pre;
   try {
     pre = await mp('/preapproval', {
       method: 'POST',
+      deviceId,
       body: {
         reason: `${plan.name} — Control Claude`,
         external_reference: `sub_${sub.id}`,
@@ -308,8 +313,9 @@ export async function startAutopay(sub, plan, card) {
     });
   } catch (err) {
     const message = autopayReject(err);
-    if (message) return { status: 'rejected', message };
-    console.error(err.message);
+    console.error(`Renovação automática recusada (assinante ${sub.id}):`, err.message);
+    // recusada: a tela oferece pagar este mês de forma avulsa (análise do antifraude é mais leve)
+    if (message) return { status: 'rejected', message, allow_once: true, reason: String(err.data?.message || err.message).slice(0, 200) };
     throw err;
   }
 
