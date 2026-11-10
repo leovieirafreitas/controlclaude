@@ -201,17 +201,35 @@
     </form>
   </dialog>
 
-  <!-- PAGAMENTO: cartão de crédito com renovação automática (Card Payment Brick do Mercado Pago) -->
+  <!-- PAGAMENTO: cartão de crédito com renovação automática (Card Payment Brick do Mercado Pago) ou Pix (mês a mês) -->
   <dialog id="pay-dlg">
     <div class="pay-box">
       <button class="close" id="pay-close" aria-label="Fechar">×</button>
       <p class="eyebrow" id="pay-eyebrow">Pagamento</p>
       <div class="summary"><strong id="pay-plan"></strong><span id="pay-amount"></span></div>
+      <div class="tabs hidden" id="pay-tabs" role="tablist">
+        <button type="button" data-method="card" class="active"><span class="pm-slot" data-icon="credito"></span>Cartão de crédito</button>
+        <button type="button" data-method="pix"><span class="pm-slot" data-icon="pix"></span>Pix</button>
+      </div>
+
       <p class="autopay-note" id="pay-month"></p>
 
       <div id="pay-card">
         <div id="cardPaymentBrick_container"></div>
         <p class="form-error hidden" id="card-error"></p>
+      </div>
+
+      <div id="pay-pix" class="hidden">
+        <div id="pix-start">
+          <button class="btn btn-primary btn-lg btn-block" id="pix-btn">Gerar Pix</button>
+        </div>
+        <div id="pix-show" class="hidden">
+          <img id="pix-qr" alt="QR Code do Pix" width="220" height="220">
+          <label>Pix copia e cola<textarea id="pix-code" rows="3" readonly></textarea></label>
+          <button class="btn btn-outline btn-block" id="pix-copy" type="button">Copiar código</button>
+          <p class="pix-wait"><span class="dot"></span> Aguardando pagamento…</p>
+        </div>
+        <p class="form-error hidden" id="pix-error"></p>
       </div>
 
       <p class="fine lock">🔒 Pagamento processado pelo Mercado Pago. Os dados do cartão não passam pelo nosso servidor.</p>

@@ -175,3 +175,5 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 #pay-eyebrow { display: inline-flex; align-items: center; gap: 6px; }
 .autopay-note { font-size: 14px; line-height: 1.5; color: var(--muted); background: var(--bg-alt); border-radius: 10px; padding: 10px 12px; margin: 8px 0 14px; }
 .autopay-note strong { color: inherit; font-weight: 650; }
+#pay-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+#pay-tabs button .pm-icon { width: 17px; height: 17px; }
