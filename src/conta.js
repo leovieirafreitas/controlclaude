@@ -364,7 +364,7 @@ function render(data) {
 
 let mpInstance = null;
 let brickController = null;
-let payMode = 'pay'; // 'pay' = assinar/pagar com renovação automática · 'card' = só trocar o cartão
+let payMode = 'pay'; // 'pay' = assinar com renovação automática · 'card' = só trocar o cartão · 'once' = plano B: este mês avulso
 
 /** Escolhe o plano (cria/atualiza a assinatura) e abre o pagamento. */
 async function choosePlan(planId) {
@@ -408,17 +408,33 @@ async function mountBrick() {
         $('#card-error').classList.add('hidden');
         call(payMode === 'card' ? '/card' : '/pay', {
           method: 'POST',
-          body: { card: { ...formData, payment_type_id: additionalData?.paymentTypeId } },
+          body: {
+            card: { ...formData, payment_type_id: additionalData?.paymentTypeId },
+            mode: payMode === 'once' ? 'once' : undefined,
+            device_id: window.MP_DEVICE_SESSION_ID || undefined,
+          },
         }).then(async (out) => {
           resolve();
           if (out.status === 'approved') {
             closePayment();
             render(out.view);
-            flash(payMode === 'card' ? out.message : 'Pagamento aprovado! Sua assinatura está ativa, com renovação automática.', 'ok');
+            flash(payMode === 'card' ? out.message
+              : payMode === 'once' ? 'Pagamento aprovado! Seu plano está ativo.'
+              : 'Pagamento aprovado! Sua assinatura está ativa, com renovação automática.', 'ok');
           } else if (out.status === 'pending') {
             closePayment();
             render(out.view);
             flash(out.message, 'warn');
+          } else if (out.allow_once && payMode === 'pay') {
+            // Plano B: o Mercado Pago não aprovou a renovação automática → pagar este mês de forma avulsa
+            payMode = 'once';
+            const price = brl(state.subscription.plan.price_cents);
+            $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} Cartão de crédito · pagamento deste mês`;
+            $('#pay-month').innerHTML = `<strong>${esc(out.message)}</strong><br>
+              Sem problema: você pode pagar <strong>este mês (${price})</strong> normalmente no cartão. Digite os dados do cartão de novo abaixo.
+              No próximo vencimento, tentamos ativar a renovação automática outra vez.`;
+            $('#card-error').classList.add('hidden');
+            await mountBrick();
           } else {
             $('#card-error').textContent = out.message;
             $('#card-error').classList.remove('hidden');

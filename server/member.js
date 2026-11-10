@@ -10,8 +10,8 @@ import { all, get, run } from './db.js';
 import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, planSoldOut } from './routes.js';
 import { EMAIL_RE, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
-import { notifyCancel, notifyKeep, notifySignup } from './whatsapp.js';
-import { mpConfigured, MP_PUBLIC_KEY, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay } from './mp.js';
+import { notifyCancel, notifyKeep, notifySignup, notifyCardRejected } from './whatsapp.js';
+import { mpConfigured, MP_PUBLIC_KEY, payWithCard, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay } from './mp.js';
 
 // Assinaturas nesses status já ocupam uma licença do plano: podem pagar mesmo com o plano esgotado.
 const HOLDS_LICENSE = ['ativo', 'pausado'];
@@ -353,7 +353,20 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (card.payment_type_id && card.payment_type_id !== 'credit_card') {
     throw new ApiError(400, 'A renovação automática funciona só com cartão de crédito.');
   }
-  const result = await startAutopay({ ...sub, email: c.email }, plan, card);
+  const deviceId = str(req.body?.device_id).slice(0, 200) || undefined;
+
+  // Plano B: o Mercado Pago recusou a renovação automática → paga este mês de forma avulsa no cartão.
+  // No próximo vencimento o cliente é convidado de novo a ligar a renovação automática.
+  if (req.body?.mode === 'once') {
+    if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
+    const month = await billingMonth(sub, plan.price_cents);
+    const result = await payWithCard({ ...sub, email: c.email }, plan, month, card, deviceId);
+    if (result.status === 'rejected') notifyCardRejected(sub.id, { once: true, message: result.message });
+    return { ...result, view: await memberView(c) };
+  }
+
+  const result = await startAutopay({ ...sub, email: c.email }, plan, card, deviceId);
+  if (result.status === 'rejected') notifyCardRejected(sub.id, { once: false, message: result.reason || result.message });
   return { ...result, view: await memberView(c) };
 })));
 

@@ -184,6 +184,25 @@ export async function notifyKeep(subscriberId) {
   ].join('\n')));
 }
 
+/** Pagamento no cartão recusado pelo Mercado Pago na área do assinante (para o admin poder ajudar na hora). */
+export async function notifyCardRejected(subscriberId, { once = false, message = '' } = {}) {
+  if (!whatsappConfigured) return;
+  const s = await subscriberInfo(subscriberId).catch(() => null);
+  if (!s) return;
+  fire(notifyAdmin([
+    once ? '💳 *Pagamento avulso no cartão recusado*' : '💳 *Renovação automática recusada pelo Mercado Pago*',
+    '',
+    ...contactLines(s),
+    `📦 *Plano:* ${s.plan_name} (${brl(s.price_cents)}/mês)`,
+    message ? `🧾 *Motivo:* ${message}` : null,
+    '',
+    once
+      ? '_O cliente tentou pagar este mês de forma avulsa e também foi recusado. Vale um contato pessoal._'
+      : '_A tela ofereceu ao cliente pagar este mês de forma avulsa no cartão._',
+    `🕒 ${nowBR()}`,
+  ].filter((l) => l !== null).join('\n')));
+}
+
 /** Cliente criou a conta (ainda sem pagar). */
 export function notifySignup({ name, email, phone, birth_date }) {
   if (!whatsappConfigured) return;
