@@ -11,7 +11,7 @@ import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, planSoldOut } fr
 import { EMAIL_RE, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
 import { notifyCancel, notifyKeep, notifySignup, notifyCardRejected } from './whatsapp.js';
-import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay } from './mp.js';
+import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay, createAutopayLink, checkPendingAutopay } from './mp.js';
 
 // Assinaturas nesses status já ocupam uma licença do plano: podem pagar mesmo com o plano esgotado.
 const HOLDS_LICENSE = ['ativo', 'pausado'];
@@ -389,6 +389,23 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   return { ...result, view: await memberView(c) };
 })));
 
+/**
+ * Assinar com renovação automática pelo Mercado Pago: devolve o link da página do Mercado Pago,
+ * onde o cliente entra na conta dele (ou paga sem conta), autoriza o cartão e paga o 1º mês.
+ */
+memberApi.post('/autopay-link', h(mpSafe(async (req) => {
+  if (!mpConfigured) throw new ApiError(503, 'Pagamento online indisponível no momento.');
+  const c = await currentCustomer(req);
+  const sub = await requireSubscription(c);
+  const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
+  if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
+  if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
+  if (sub.mp_preapproval_id && sub.autopay_status === 'authorized' && !sub.cancel_at) {
+    throw new ApiError(400, 'Sua renovação automática já está ativa.');
+  }
+  return { url: await createAutopayLink({ ...sub, email: c.email }, plan) };
+})));
+
 /** Troca o cartão da renovação automática (sem cobrar agora). */
 memberApi.post('/card', h(mpSafe(async (req) => {
   const c = await currentCustomer(req);
@@ -411,6 +428,7 @@ memberApi.post('/sync', h(async (req) => {
     if (/^ORD[A-Z0-9]+$/.test(orderId)) await syncOrderId(orderId, sub.id).catch((e) => console.error(e.message));
     await syncSubscriber(sub.id).catch((e) => console.error(e.message));
     await syncAutopay(sub).catch((e) => console.error(e.message));
+    await checkPendingAutopay(sub).catch((e) => console.error(e.message));
   }
   return memberView(c);
 }));

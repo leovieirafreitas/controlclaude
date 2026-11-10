@@ -215,6 +215,12 @@
       <p class="autopay-note" id="pay-month"></p>
 
       <div id="pay-card">
+        <!-- renovação automática: o cliente assina na página do Mercado Pago -->
+        <div id="autopay-box" class="hidden">
+          <button type="button" class="btn btn-primary btn-lg btn-block" id="autopay-btn">Assinar pelo Mercado Pago</button>
+          <p class="fine">Você vai para a página segura do Mercado Pago, entra na sua conta (ou continua sem conta), escolhe o cartão e confirma. Depois volta para cá com o plano ativo.</p>
+          <button type="button" class="link center-link" id="once-link">Prefiro pagar só este mês no cartão</button>
+        </div>
         <div id="cardPaymentBrick_container"></div>
         <p class="form-error hidden" id="card-error"></p>
       </div>

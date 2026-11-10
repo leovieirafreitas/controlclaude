@@ -459,8 +459,6 @@ async function mountBrick() {
 function openPayment(mode = 'pay') {
   const sub = state.subscription;
   if (!sub || !state.can_pay) return;
-  // renovação automática recusada há poucos dias: vai direto para o pagamento avulso deste mês
-  if (mode === 'pay' && sub.autopay_blocked) mode = 'once';
   payMode = mode;
   const price = brl(sub.plan.price_cents);
   $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : mode === 'once' ? 'Cartão de crédito · pagamento deste mês' : 'Cartão de crédito · renovação automática'}`;
@@ -471,7 +469,7 @@ function openPayment(mode = 'pay') {
     : mode === 'once'
       ? `Pague <strong>este mês (${price})</strong> no cartão de crédito, de forma avulsa (mensalidade de ${fmtMonth(sub.next_charge.month)}).
          No próximo vencimento, tentamos ativar a renovação automática outra vez.`
-    : `Cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, neste cartão.
+    : `Assine pelo Mercado Pago: cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, no cartão que você escolher.
        Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do período pago, sem estorno.`;
   cardNote = $('#pay-month').innerHTML;
   $('#card-error').classList.add('hidden');
@@ -483,12 +481,45 @@ function openPayment(mode = 'pay') {
   stopPix();
   payMethod('card');
   $('#pay-dlg').showModal();
+  showCardForm(mode !== 'pay');
+}
+
+/** No modo "assinar", mostra o botão do Mercado Pago; nos outros (avulso, trocar cartão), o formulário do cartão. */
+function showCardForm(form) {
+  $('#autopay-box').classList.toggle('hidden', form);
+  $('#cardPaymentBrick_container').classList.toggle('hidden', !form);
+  if (!form) return unmountBrick();
   mountBrick().catch((err) => {
     console.error(err);
     $('#card-error').textContent = 'Não foi possível abrir o formulário do cartão. Tente de novo em instantes.';
     $('#card-error').classList.remove('hidden');
   });
 }
+
+$('#autopay-btn').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = 'Abrindo o Mercado Pago…';
+  $('#card-error').classList.add('hidden');
+  try {
+    const { url } = await call('/autopay-link', { method: 'POST', body: {} });
+    window.location.href = url;
+  } catch (err) {
+    $('#card-error').textContent = err.message;
+    $('#card-error').classList.remove('hidden');
+    btn.disabled = false;
+    btn.textContent = 'Assinar pelo Mercado Pago';
+  }
+});
+
+$('#once-link').addEventListener('click', () => {
+  payMode = 'once';
+  const price = brl(state.subscription.plan.price_cents);
+  $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} Cartão de crédito · pagamento deste mês`;
+  $('#pay-month').innerHTML = `Pague <strong>este mês (${price})</strong> no cartão, de forma avulsa (mensalidade de ${fmtMonth(state.subscription.next_charge.month)}). Sem renovação automática: no próximo mês você paga de novo.`;
+  cardNote = $('#pay-month').innerHTML;
+  showCardForm(true);
+});
 
 let cardNote = '';
 function payMethod(method) {
@@ -671,9 +702,28 @@ $('#logout').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ início
 
+/** Voltou da página do Mercado Pago depois de assinar: confere a assinatura algumas vezes. */
+async function afterMercadoPago() {
+  history.replaceState(null, '', '/conta');
+  flash('Conferindo sua assinatura no Mercado Pago…', 'warn');
+  for (let i = 0; i < 6; i++) {
+    const data = await call('/sync', { method: 'POST', body: {} }).catch(() => null);
+    if (data) render(data);
+    if (data?.subscription?.autopay?.status === 'authorized') {
+      return flash('Assinatura confirmada! A renovação automática está ativa.', 'ok');
+    }
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+  flash('Ainda não recebemos a confirmação do Mercado Pago. Se você concluiu a assinatura, ela aparece aqui em alguns minutos.', 'warn');
+}
+
 async function start(attempt = 1) {
   try {
     await call('/me');
+    if (params.has('assinatura')) {
+      render(await call('/me'));
+      return afterMercadoPago();
+    }
     await afterAuth(); // logado: se veio de "Assinar" na página de vendas, já abre o pagamento
   } catch (err) {
     // Servidor reiniciando ou instável: tenta de novo em vez de mandar para o login
