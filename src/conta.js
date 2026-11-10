@@ -322,16 +322,34 @@ function render(data) {
     $('#keep-box').classList.toggle('hidden', !scheduled);
     if (scheduled) $('#keep-text').innerHTML = `Você pediu o cancelamento. Seu plano continua ativo até <strong>${fmtDate(sub.cancel_at)}</strong> e depois será encerrado. Mudou de ideia?`;
     $('#change-btn').classList.toggle('hidden', active);
-    $('#pay-btn').classList.toggle('hidden', !can_pay || scheduled || sub.plan.sold_out);
+
+    // renovação automática no cartão
+    const ap = sub.autopay;
+    const apOn = ap?.status === 'authorized';
+    const card = ap?.card_last4 ? `cartão final ${ap.card_last4}` : 'seu cartão';
+    const nextDate = ap?.next_charge_date ? fmtDate(ap.next_charge_date) : null;
+    const failed = apOn && !next.current_paid && active && ap.next_charge_date && ap.next_charge_date < new Date().toLocaleDateString('sv-SE');
+    $('#autopay-row').classList.toggle('hidden', !ap);
+    $('#autopay').textContent = !ap ? '' : apOn ? `Ligada · ${card}` : 'Pausada (cancelamento agendado)';
+    $('#card-btn').classList.toggle('hidden', !ap || cancelled);
+    $('#due').textContent = apOn && nextDate ? `Próxima cobrança em ${nextDate}` : `Todo dia ${sub.due_day}`;
+
+    const showPay = can_pay && !scheduled && !sub.plan.sold_out && (!apOn || failed);
+    $('#pay-btn').classList.toggle('hidden', !showPay);
     $('#check-btn').classList.toggle('hidden', !can_pay || scheduled || (active && next.current_paid));
-    $('#pay-btn').textContent = cancelled ? 'Reativar plano' : next.current_paid ? `Adiantar ${fmtMonth(next.month)}` : `Pagar ${fmtMonth(next.month)}`;
+    $('#pay-btn').textContent = failed ? 'Pagar com outro cartão'
+      : cancelled ? 'Reativar plano'
+      : next.current_paid ? 'Ativar renovação automática'
+      : `Assinar com cartão de crédito`;
     $('#charge-info').textContent = cancelled
       ? 'Seu plano está cancelado. Você não será mais cobrado.'
-      : scheduled ? 'Cancelamento agendado: você não será mais cobrado.'
+      : scheduled ? 'Cancelamento agendado: nenhuma nova cobrança será feita.'
+      : failed ? `A cobrança automática no ${card} não foi aprovada. Pague com outro cartão para manter o acesso.`
+      : apOn ? (nextDate ? `Renovação automática: em ${nextDate} cobramos ${brl(sub.plan.price_cents)} no ${card}. Você não precisa fazer nada.` : 'Renovação automática ligada.')
       : next.current_paid
-        ? 'Sua mensalidade deste mês está paga. Obrigado!'
+        ? 'Sua mensalidade deste mês está paga. Ative a renovação automática para não se preocupar com o vencimento.'
         : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
-        : `Mensalidade de ${fmtMonth(next.month)} em aberto.`;
+        : `Mensalidade de ${fmtMonth(next.month)} em aberto. O pagamento é no cartão de crédito, com renovação automática todo mês.`;
   }
 
   $('#payments-card').classList.toggle('hidden', !sub);
@@ -342,11 +360,11 @@ function render(data) {
   show('#panel');
 }
 
-// ------------------------------------------------------------------ pagamento (Orders API: cartão e Pix no site)
+// ------------------------------------------------------------------ pagamento: cartão de crédito com renovação automática (assinatura do Mercado Pago)
 
 let mpInstance = null;
 let brickController = null;
-let pixTimer = null;
+let payMode = 'pay'; // 'pay' = assinar/pagar com renovação automática · 'card' = só trocar o cartão
 
 /** Escolhe o plano (cria/atualiza a assinatura) e abre o pagamento. */
 async function choosePlan(planId) {
@@ -359,22 +377,11 @@ async function choosePlan(planId) {
   openPayment();
 }
 
-function stopPix() {
-  clearInterval(pixTimer);
-  pixTimer = null;
-}
-
 async function unmountBrick() {
   if (brickController) {
     try { await brickController.unmount(); } catch { /* ok */ }
     brickController = null;
   }
-}
-
-function payMethod(method) {
-  document.querySelectorAll('#pay-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
-  $('#pay-card').classList.toggle('hidden', method !== 'card');
-  $('#pay-pix').classList.toggle('hidden', method !== 'pix');
 }
 
 async function mountBrick() {
@@ -390,7 +397,8 @@ async function mountBrick() {
   brickController = await mpInstance.bricks().create('cardPayment', 'cardPaymentBrick_container', {
     initialization: { amount: sub.plan.price_cents / 100, payer: { email: state.customer.email } },
     customization: {
-      paymentMethods: { maxInstallments: 1 },
+      // só cartão de crédito, à vista: é ele que o Mercado Pago cobra todo mês
+      paymentMethods: { maxInstallments: 1, types: { excluded: ['debit_card'] } },
       visual: { style: { theme: dark ? 'dark' : 'default' } },
     },
     callbacks: {
@@ -398,15 +406,15 @@ async function mountBrick() {
       onError: (error) => console.error('Brick:', error),
       onSubmit: (formData, additionalData) => new Promise((resolve, reject) => {
         $('#card-error').classList.add('hidden');
-        call('/pay', {
+        call(payMode === 'card' ? '/card' : '/pay', {
           method: 'POST',
-          body: { method: 'card', card: { ...formData, payment_type_id: additionalData?.paymentTypeId } },
+          body: { card: { ...formData, payment_type_id: additionalData?.paymentTypeId } },
         }).then(async (out) => {
           resolve();
           if (out.status === 'approved') {
             closePayment();
             render(out.view);
-            flash('Pagamento aprovado! Sua assinatura está ativa.', 'ok');
+            flash(payMode === 'card' ? out.message : 'Pagamento aprovado! Sua assinatura está ativa, com renovação automática.', 'ok');
           } else if (out.status === 'pending') {
             closePayment();
             render(out.view);
@@ -427,78 +435,34 @@ async function mountBrick() {
   });
 }
 
-function openPayment() {
+function openPayment(mode = 'pay') {
   const sub = state.subscription;
   if (!sub || !state.can_pay) return;
+  payMode = mode;
+  const price = brl(sub.plan.price_cents);
+  $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : 'Cartão de crédito · renovação automática'}`;
   $('#pay-plan').textContent = sub.plan.name;
-  $('#pay-amount').textContent = `${brl(sub.plan.price_cents)}/mês`;
-  $('#pay-month').textContent = `Referente à mensalidade de ${fmtMonth(sub.next_charge.month)}.`;
+  $('#pay-amount').textContent = `${price}/mês`;
+  $('#pay-month').innerHTML = mode === 'card'
+    ? 'As próximas cobranças automáticas serão feitas no novo cartão. <strong>Nada é cobrado agora.</strong>'
+    : `Cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, neste cartão.
+       Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do período pago, sem estorno.`;
   $('#card-error').classList.add('hidden');
-  $('#pix-error').classList.add('hidden');
-  $('#pix-start').classList.remove('hidden');
-  $('#pix-show').classList.add('hidden');
-  stopPix();
-  payMethod('card');
   $('#pay-dlg').showModal();
   mountBrick().catch((err) => {
     console.error(err);
-    $('#card-error').textContent = 'Não foi possível abrir o formulário do cartão. Tente o Pix.';
+    $('#card-error').textContent = 'Não foi possível abrir o formulário do cartão. Tente de novo em instantes.';
     $('#card-error').classList.remove('hidden');
   });
 }
 
 function closePayment() {
-  stopPix();
   unmountBrick();
   if ($('#pay-dlg').open) $('#pay-dlg').close();
 }
 
-document.querySelectorAll('.pm-slot').forEach((el) => { el.outerHTML = methodIcon(el.dataset.icon); }); // ícones Pix/cartão nas abas
-document.querySelectorAll('#pay-tabs button').forEach((b) => b.addEventListener('click', () => payMethod(b.dataset.method)));
 $('#pay-close').addEventListener('click', closePayment);
-$('#pay-dlg').addEventListener('cancel', () => { stopPix(); unmountBrick(); });
-
-$('#pix-btn').addEventListener('click', async (e) => {
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  btn.textContent = 'Gerando…';
-  $('#pix-error').classList.add('hidden');
-  try {
-    const { pix } = await call('/pay', { method: 'POST', body: { method: 'pix' } });
-    if (pix.qr_code_base64) $('#pix-qr').src = `data:image/png;base64,${pix.qr_code_base64}`;
-    $('#pix-qr').classList.toggle('hidden', !pix.qr_code_base64);
-    $('#pix-code').value = pix.qr_code || '';
-    $('#pix-start').classList.add('hidden');
-    $('#pix-show').classList.remove('hidden');
-    // confere a cada 5 s (até 30 min) se o Pix foi pago
-    const started = Date.now();
-    const paidBefore = state.payments.length;
-    stopPix();
-    pixTimer = setInterval(async () => {
-      if (Date.now() - started > 30 * 60_000) return stopPix();
-      try {
-        const data = await call('/sync', { method: 'POST', body: { order_id: pix.order_id } });
-        if (data.payments.length > paidBefore) {
-          closePayment();
-          render(data);
-          flash('Pix recebido! Sua assinatura está ativa.', 'ok');
-        }
-      } catch { /* tenta de novo no próximo ciclo */ }
-    }, 5000);
-  } catch (err) {
-    $('#pix-error').textContent = err.message;
-    $('#pix-error').classList.remove('hidden');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Gerar Pix';
-  }
-});
-
-$('#pix-copy').addEventListener('click', async (e) => {
-  try { await navigator.clipboard.writeText($('#pix-code').value); } catch { $('#pix-code').select(); document.execCommand('copy'); }
-  e.currentTarget.textContent = 'Copiado!';
-  setTimeout(() => { e.currentTarget.textContent = 'Copiar código'; }, 1800);
-});
+$('#pay-dlg').addEventListener('cancel', () => { unmountBrick(); });
 
 $('#mini-plans').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-plan]');
@@ -513,7 +477,8 @@ $('#mini-plans').addEventListener('click', async (e) => {
   }
 });
 
-$('#pay-btn').addEventListener('click', openPayment);
+$('#pay-btn').addEventListener('click', () => openPayment('pay'));
+$('#card-btn').addEventListener('click', () => openPayment('card'));
 
 $('#change-btn').addEventListener('click', () => {
   $('#choose').classList.remove('hidden');
@@ -529,7 +494,7 @@ $('#check-btn').addEventListener('click', async (e) => {
     const data = await call('/sync', { method: 'POST', body: {} });
     render(data);
     const found = data.payments.length > before;
-    flash(found ? 'Pagamento encontrado e registrado!' : 'Ainda não encontramos um pagamento aprovado. Se pagou com Pix, pode levar alguns minutos.', found ? 'ok' : 'warn');
+    flash(found ? 'Pagamento encontrado e registrado!' : 'Ainda não encontramos um pagamento aprovado. Se acabou de pagar, pode levar alguns minutos.', found ? 'ok' : 'warn');
   } catch (err) {
     flash(err.message, 'bad');
   } finally {

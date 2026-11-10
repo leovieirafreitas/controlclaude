@@ -195,6 +195,180 @@ export async function syncSubscriber(subscriberId) {
   return added;
 }
 
+// ------------------------------------------------------------------ renovação automática (assinatura no cartão)
+//
+// O cliente autoriza o cartão uma vez (POST /preapproval com o token do Card Payment Brick) e o
+// Mercado Pago cobra sozinho todo mês. A 1ª cobrança acontece na hora da autorização.
+// Cada cobrança aprovada vira um pagamento no painel (mp_payment_id evita duplicar).
+// Cancelar = pausar (para de cobrar, o acesso pago continua); no fim do acesso, cancela de vez.
+
+const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
+const BACK_URL = APP_URL.startsWith('https://') ? `${APP_URL}/conta` : 'https://controlclaude.com.br/conta';
+
+const autopayReject = (err) => {
+  const msg = String(err.data?.message || err.message || '');
+  if (/CC_VAL_433|rejected|card_token|Invalid_payment_method|Unsupported_credit_card/i.test(msg)) {
+    return /Unsupported_credit_card|Invalid_payment_method/i.test(msg)
+      ? 'Este cartão não aceita cobrança mensal automática. Tente outro cartão de crédito.'
+      : 'O cartão foi recusado. Confira os dados ou tente outro cartão de crédito.';
+  }
+  return null;
+};
+
+/** Muda o status da assinatura no Mercado Pago: 'paused' | 'authorized' | 'cancelled'. */
+export async function setAutopayStatus(sub, status) {
+  if (!sub?.mp_preapproval_id || !mpConfigured) return false;
+  if (sub.autopay_status === status || sub.autopay_status === 'cancelled') return false;
+  const pre = await mp(`/preapproval/${encodeURIComponent(sub.mp_preapproval_id)}`, { method: 'PUT', body: { status } });
+  await run('UPDATE subscribers SET autopay_status = ?, next_charge_date = ? WHERE id = ?',
+    [pre.status || status, pre.next_payment_date ? String(pre.next_payment_date).slice(0, 10) : null, sub.id]);
+  return true;
+}
+
+/** Ajusta o valor da cobrança mensal (troca de plano). */
+export async function setAutopayAmount(sub, priceCents) {
+  if (!sub?.mp_preapproval_id || !mpConfigured || sub.autopay_status === 'cancelled') return;
+  await mp(`/preapproval/${encodeURIComponent(sub.mp_preapproval_id)}`, {
+    method: 'PUT', body: { auto_recurring: { transaction_amount: Number(money(priceCents)), currency_id: 'BRL' } },
+  });
+}
+
+/** Registra uma cobrança aprovada da assinatura (idempotente). Retorna true se registrou agora. */
+async function recordAutopayCharge(subId, invoice) {
+  const pay = invoice.payment || {};
+  if (pay.status !== 'approved' || !pay.id) return false;
+  const sub = await get(`SELECT s.*, p.price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [subId]);
+  if (!sub) return false;
+  if (await get('SELECT 1 AS x FROM payments WHERE mp_payment_id = ?', [String(pay.id)])) return false;
+
+  // cobre o primeiro mês ainda não quitado (mesma regra do pagamento avulso)
+  const month = await (await import('./member.js')).billingMonth(sub, sub.price_cents);
+  const amountCents = Math.round(Number(invoice.transaction_amount || pay.transaction_amount || 0) * 100);
+  const r = await run(`
+    INSERT INTO payments (subscriber_id, ref_month, amount_cents, paid_at, method, notes, mp_payment_id)
+    VALUES (?, ?, ?, ?, 'credito', ?, ?)
+    ON CONFLICT (mp_payment_id) WHERE mp_payment_id IS NOT NULL DO NOTHING`,
+  [sub.id, month, amountCents, new Date().toLocaleDateString('sv-SE'), `Mercado Pago renovação automática ${invoice.id}`, String(pay.id)]);
+  if (!r.rowCount) return false;
+
+  if (sub.status !== 'ativo') await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [sub.id]); // foi cobrado: plano ativo
+  // o vencimento passa a ser o dia em que o cartão é cobrado
+  const day = Math.min(Number(new Date().toLocaleDateString('sv-SE').slice(8, 10)), 28);
+  if (sub.due_day !== day) await run('UPDATE subscribers SET due_day = ? WHERE id = ?', [day, sub.id]);
+  notifyPayment({ subscriberId: sub.id, month, orderId: `renovação automática ${invoice.id}`, amountCents, method: 'credito', autopay: true })
+    .catch((e) => console.error('WhatsApp:', e.message));
+  return true;
+}
+
+/**
+ * Confere a assinatura no Mercado Pago: status, próxima cobrança, final do cartão e cobranças aprovadas.
+ * Retorna quantas cobranças novas registrou.
+ */
+export async function syncAutopay(sub) {
+  if (!sub?.mp_preapproval_id || !mpConfigured) return 0;
+  const id = encodeURIComponent(sub.mp_preapproval_id);
+  const [pre, inv] = await Promise.all([mp(`/preapproval/${id}`), mp(`/authorized_payments/search?preapproval_id=${id}`)]);
+  await run('UPDATE subscribers SET autopay_status = ?, next_charge_date = ? WHERE id = ?',
+    [pre.status || sub.autopay_status, pre.next_payment_date ? String(pre.next_payment_date).slice(0, 10) : null, sub.id]);
+  let added = 0;
+  for (const invoice of inv.results || []) {
+    if (await recordAutopayCharge(sub.id, invoice)) added++;
+    if (!sub.card_last4 && invoice.payment?.id && invoice.payment.status === 'approved') {
+      const p = await mp(`/v1/payments/${invoice.payment.id}`).catch(() => null);
+      if (p?.card?.last_four_digits) {
+        await run('UPDATE subscribers SET card_last4 = ?, card_brand = ? WHERE id = ?', [p.card.last_four_digits, p.payment_method_id || null, sub.id]);
+        sub.card_last4 = p.card.last_four_digits;
+      }
+    }
+  }
+  return added;
+}
+
+/**
+ * Liga a renovação automática com o cartão do Card Payment Brick e faz a 1ª cobrança.
+ * Se já existe uma assinatura no Mercado Pago, ela é substituída (o cartão novo passa a valer).
+ * Retorna { status: 'approved' | 'pending' | 'rejected', message }.
+ */
+export async function startAutopay(sub, plan, card) {
+  let pre;
+  try {
+    pre = await mp('/preapproval', {
+      method: 'POST',
+      body: {
+        reason: `${plan.name} — Control Claude`,
+        external_reference: `sub_${sub.id}`,
+        // MP_TEST_PAYER_EMAIL: só no .env de teste (o sandbox exige o e-mail do comprador de teste)
+        payer_email: process.env.MP_TEST_PAYER_EMAIL || card.payer?.email || sub.email,
+        card_token_id: card.token,
+        status: 'authorized',
+        back_url: BACK_URL,
+        auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: Number(money(plan.price_cents)), currency_id: 'BRL' },
+      },
+    });
+  } catch (err) {
+    const message = autopayReject(err);
+    if (message) return { status: 'rejected', message };
+    console.error(err.message);
+    throw err;
+  }
+
+  // a assinatura antiga (se houver) deixa de cobrar: vale só o cartão novo
+  if (sub.mp_preapproval_id && sub.mp_preapproval_id !== pre.id && sub.autopay_status !== 'cancelled') {
+    await mp(`/preapproval/${encodeURIComponent(sub.mp_preapproval_id)}`, { method: 'PUT', body: { status: 'cancelled' } })
+      .catch((e) => console.error('Mercado Pago (assinatura antiga):', e.message));
+  }
+  await run(`UPDATE subscribers SET mp_preapproval_id = ?, autopay_status = ?, card_last4 = NULL, card_brand = ?,
+             next_charge_date = ?, cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL WHERE id = ?`,
+  [pre.id, pre.status, card.payment_method_id || null, pre.next_payment_date ? String(pre.next_payment_date).slice(0, 10) : null, sub.id]);
+  const fresh = { ...sub, mp_preapproval_id: pre.id, autopay_status: pre.status, card_last4: null };
+
+  // a 1ª cobrança costuma aparecer em poucos segundos
+  for (let i = 0; i < 6; i++) {
+    await new Promise((s) => setTimeout(s, 2000));
+    if (await syncAutopay(fresh)) return { status: 'approved', message: 'Pagamento aprovado! A renovação automática está ligada.' };
+  }
+  return { status: 'pending', message: 'Cartão autorizado! A primeira cobrança está sendo processada e seu plano é ativado assim que for aprovada.' };
+}
+
+/** Troca o cartão da renovação automática sem cobrar agora. */
+export async function changeAutopayCard(sub, card) {
+  try {
+    await mp(`/preapproval/${encodeURIComponent(sub.mp_preapproval_id)}`, { method: 'PUT', body: { card_token_id: card.token } });
+  } catch (err) {
+    const message = autopayReject(err);
+    if (message) return { status: 'rejected', message };
+    throw err;
+  }
+  await run('UPDATE subscribers SET card_last4 = NULL, card_brand = ? WHERE id = ?', [card.payment_method_id || null, sub.id]);
+  return { status: 'approved', message: 'Cartão atualizado! As próximas cobranças serão feitas nele.' };
+}
+
+/** Webhook de assinatura: id da assinatura (preapproval) ou de uma cobrança (authorized_payment). */
+export async function syncAutopayNotification(type, id) {
+  let preapprovalId = id;
+  if (type === 'subscription_authorized_payment') {
+    const invoice = await mp(`/authorized_payments/${encodeURIComponent(id)}`);
+    preapprovalId = invoice.preapproval_id;
+  }
+  if (!preapprovalId) return 0;
+  const sub = await get('SELECT * FROM subscribers WHERE mp_preapproval_id = ?', [String(preapprovalId)]);
+  return sub ? syncAutopay(sub) : 0;
+}
+
+/** Rede de segurança: confere as renovações automáticas perto (ou depois) da data de cobrança. */
+export async function syncDueAutopays() {
+  if (!mpConfigured) return 0;
+  const subs = await all(`
+    SELECT * FROM subscribers
+    WHERE mp_preapproval_id IS NOT NULL AND autopay_status = 'authorized'
+      AND (next_charge_date IS NULL OR next_charge_date <= current_date + 1 OR card_last4 IS NULL)`);
+  let added = 0;
+  for (const sub of subs) added += await syncAutopay(sub).catch((e) => { console.error('Renovação automática:', e.message); return 0; });
+  if (added) console.log(`Mercado Pago: ${added} cobrança(s) automática(s) registrada(s)`);
+  return added;
+}
+
+
 /**
  * Rede de segurança (funciona mesmo sem webhook): confere no Mercado Pago os pedidos
  * das últimas 48 h que ainda não viraram pagamento — ex.: cliente pagou o Pix e fechou a página.

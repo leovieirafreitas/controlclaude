@@ -11,7 +11,7 @@ import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, planSoldOut } fr
 import { EMAIL_RE, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
 import { notifyCancel, notifyKeep, notifySignup } from './whatsapp.js';
-import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber } from './mp.js';
+import { mpConfigured, MP_PUBLIC_KEY, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay } from './mp.js';
 
 // Assinaturas nesses status já ocupam uma licença do plano: podem pagar mesmo com o plano esgotado.
 const HOLDS_LICENSE = ['ativo', 'pausado'];
@@ -19,7 +19,7 @@ const SOLD_OUT_MSG = 'Este plano está esgotado no momento. Escolha outro plano 
 
 export const memberApi = Router();
 // Versão dos Termos de uso / Política de privacidade (mude junto com a data nas páginas termos.html e privacidade.html)
-const TERMS_VERSION = '2026-11-08';
+const TERMS_VERSION = '2026-11-09';
 export const memberSession = makeSession({ cookie: 'msid', maxAgeMs: 30 * 24 * 3600_000, sameSite: 'lax' });
 
 // ------------------------------------------------------------------ helpers
@@ -265,6 +265,10 @@ async function memberViewByEmail(email) {
       plan: { id: sub.plan_id, name: sub.plan_name, price_cents: sub.price_cents, description: sub.plan_description,
         sold_out: sub.plan_sold_out && !HOLDS_LICENSE.includes(sub.status) },
       next_charge: { month: next, current_paid: next !== month },
+      // renovação automática no cartão (assinatura do Mercado Pago)
+      autopay: sub.mp_preapproval_id && sub.autopay_status !== 'cancelled'
+        ? { status: sub.autopay_status, card_last4: sub.card_last4, card_brand: sub.card_brand, next_charge_date: sub.next_charge_date }
+        : null,
     };
   }
   return {
@@ -320,6 +324,7 @@ memberApi.post('/subscribe', h(async (req) => {
     [c.id, c.name, c.email, c.phone, c.birth_date, plan.id, today, Math.min(Number(today.slice(8, 10)), 28)]);
   } else if (sub.plan_id !== plan.id) {
     await run("UPDATE subscribers SET plan_id = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END WHERE id = ?", [plan.id, sub.id]);
+    await setAutopayAmount(sub, plan.price_cents).catch((e) => console.error('Mercado Pago (valor da renovação):', e.message));
   }
 
   const view = await memberView(c);
@@ -331,25 +336,38 @@ memberApi.post('/subscribe', h(async (req) => {
 }));
 
 /**
- * Paga a mensalidade em aberto.
- *   { method: 'card', card: { token, payment_method_id, installments, payer } } → { status, message, view }
- *   { method: 'pix' } → { pix: { order_id, qr_code, qr_code_base64, ticket_url } }
+ * Assina com renovação automática no cartão de crédito (obrigatória): autoriza o cartão no Mercado Pago,
+ * que cobra a 1ª mensalidade na hora e as próximas sozinho, todo mês.
+ *   { card: { token, payment_method_id, payer } } → { status, message, view }
  */
 memberApi.post('/pay', h(mpSafe(async (req) => {
   if (!mpConfigured) throw new ApiError(503, 'Pagamento online indisponível no momento.');
+  if (req.body?.method === 'pix') throw new ApiError(400, 'O pagamento é só por cartão de crédito, com renovação automática.');
   const c = await currentCustomer(req);
   const sub = await requireSubscription(c);
   const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
   if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
-  const month = await billingMonth(sub, plan.price_cents);
-
-  if (req.body?.method === 'pix') {
-    return { pix: await payWithPix({ ...sub, email: c.email }, plan, month), amount_cents: plan.price_cents };
-  }
   const card = req.body?.card || {};
   if (!card.token || !card.payment_method_id) throw new ApiError(400, 'Dados do cartão incompletos.');
-  const result = await payWithCard({ ...sub, email: c.email }, plan, month, card);
+  if (card.payment_type_id && card.payment_type_id !== 'credit_card') {
+    throw new ApiError(400, 'A renovação automática funciona só com cartão de crédito.');
+  }
+  const result = await startAutopay({ ...sub, email: c.email }, plan, card);
+  return { ...result, view: await memberView(c) };
+})));
+
+/** Troca o cartão da renovação automática (sem cobrar agora). */
+memberApi.post('/card', h(mpSafe(async (req) => {
+  const c = await currentCustomer(req);
+  const sub = await requireSubscription(c);
+  if (!sub.mp_preapproval_id || !['authorized', 'paused'].includes(sub.autopay_status)) {
+    throw new ApiError(400, 'Você ainda não tem renovação automática. Use "Pagar" para cadastrar o cartão.');
+  }
+  const card = req.body?.card || {};
+  if (!card.token) throw new ApiError(400, 'Dados do cartão incompletos.');
+  if (card.payment_type_id && card.payment_type_id !== 'credit_card') throw new ApiError(400, 'Use um cartão de crédito.');
+  const result = await changeAutopayCard(sub, card);
   return { ...result, view: await memberView(c) };
 })));
 
@@ -360,6 +378,7 @@ memberApi.post('/sync', h(async (req) => {
     const orderId = str(req.body?.order_id);
     if (/^ORD[A-Z0-9]+$/.test(orderId)) await syncOrderId(orderId, sub.id).catch((e) => console.error(e.message));
     await syncSubscriber(sub.id).catch((e) => console.error(e.message));
+    await syncAutopay(sub).catch((e) => console.error(e.message));
   }
   return memberView(c);
 }));
@@ -397,6 +416,8 @@ memberApi.post('/cancel', h(async (req) => {
     await run("UPDATE subscribers SET status = 'cancelado', notes = trim(notes || ' · Cancelado pelo assinante em ' || ?::text) WHERE id = ?",
       [today, sub.id]);
   }
+  // a cobrança automática para agora (sem estorno): pausada enquanto há acesso pago, cancelada se acabou
+  await setAutopayStatus(sub, until ? 'paused' : 'cancelled').catch((e) => console.error('Mercado Pago (cancelar renovação):', e.message));
   notifyCancel(sub.id, until).catch((e) => console.error('WhatsApp:', e.message));
   return memberView(c);
 }));
@@ -409,6 +430,7 @@ memberApi.post('/keep', h(async (req) => {
   await run(`UPDATE subscribers SET cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL,
              notes = trim(notes || ' · Desistiu do cancelamento em ' || ?::text) WHERE id = ?`,
   [todayISO().split('-').reverse().join('/'), sub.id]);
+  await setAutopayStatus(sub, 'authorized').catch((e) => console.error('Mercado Pago (retomar renovação):', e.message));
   notifyKeep(sub.id).catch((e) => console.error('WhatsApp:', e.message));
   return memberView(c);
 }));

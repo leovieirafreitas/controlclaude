@@ -160,6 +160,8 @@ td.num { font-variant-numeric: tabular-nums; }
 .b-pendente, .b-pausado { background: var(--info-bg); color: var(--info); }
 .b-parcial { background: var(--warn-bg); color: var(--warn); }
 .b-atrasado, .b-cancelado, .b-inativo { background: var(--bad-bg); color: var(--bad); }
+.b-autopay { background: var(--info-bg); color: var(--info); display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
+.b-autopay .pm-icon { width: 13px; height: 13px; }
 
 /* ---------- botões e campos */
 .btn {

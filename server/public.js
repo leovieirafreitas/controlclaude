@@ -5,7 +5,7 @@ import { hmac } from './otp.js';
 import { handleIncomingMessage } from './whatsapp.js';
 import { all } from './db.js';
 import { h, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL } from './routes.js';
-import { mpConfigured, syncOrderId } from './mp.js';
+import { mpConfigured, syncOrderId, syncAutopayNotification } from './mp.js';
 
 export const publicApi = Router();
 
@@ -27,6 +27,10 @@ publicApi.post('/mp-webhook', async (req, res) => {
   res.sendStatus(200);
   if (type === 'order' && /^ORD[A-Z0-9]+$/.test(id)) {
     syncOrderId(id).catch((e) => console.error('Webhook MP:', e.message));
+  }
+  // Renovação automática (ative "Planos e assinaturas" no webhook do Mercado Pago)
+  if ((type === 'subscription_preapproval' || type === 'subscription_authorized_payment') && /^[A-Za-z0-9-]{1,64}$/.test(id)) {
+    syncAutopayNotification(type, id).catch((e) => console.error('Webhook MP (assinatura):', e.message));
   }
 });
 
