@@ -231,6 +231,111 @@ async function claim(kind, subscriberId, ref) {
 const unclaim = (kind, subscriberId, ref) =>
   run('DELETE FROM notifications_sent WHERE kind = ? AND subscriber_id = ? AND ref = ?', [kind, subscriberId, ref]);
 
+// ------------------------------------------------------------------ ritmo dos avisos programados (anti-bloqueio)
+
+/**
+ * Avisos programados para clientes (lembretes, aviso do cartão, atraso, retenção, checkout) saem em fila,
+ * um de cada vez, com um intervalo sorteado entre eles e limite por hora e por dia — para o WhatsApp
+ * não tratar o número como disparo em massa. Mensagens imediatas (confirmação de pagamento, códigos,
+ * respostas) não passam pela fila. Configurável na aba WhatsApp do painel (tabela settings).
+ */
+export const PACING_DEFAULTS = { on: true, gap_min: 60, gap_max: 180, per_hour: 15, per_day: 60, hour_start: 9, hour_end: 20 };
+const PACED_KINDS = ['aviso_cartao', 'lembrete', 'atraso_cliente', 'retencao', 'checkout_1h', 'checkout_24h'];
+const PACING_KEY = 'whatsapp_pacing';
+
+const clampInt = (v, min, max, dflt) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : dflt;
+};
+
+/** Valida e completa a configuração (valores fora da faixa são ajustados). */
+export function normalizePacing(raw = {}) {
+  const d = PACING_DEFAULTS;
+  const p = {
+    on: raw.on === undefined ? d.on : raw.on === true || raw.on === 'true' || raw.on === 'on',
+    gap_min: clampInt(raw.gap_min, 5, 3600, d.gap_min),
+    gap_max: clampInt(raw.gap_max, 5, 3600, d.gap_max),
+    per_hour: clampInt(raw.per_hour, 1, 200, d.per_hour),
+    per_day: clampInt(raw.per_day, 1, 1000, d.per_day),
+    hour_start: clampInt(raw.hour_start, 0, 23, d.hour_start),
+    hour_end: clampInt(raw.hour_end, 1, 24, d.hour_end),
+  };
+  if (p.gap_max < p.gap_min) p.gap_max = p.gap_min;
+  if (p.hour_end <= p.hour_start) p.hour_end = Math.min(24, p.hour_start + 1);
+  return p;
+}
+
+export async function getPacing() {
+  const row = await get('SELECT value FROM settings WHERE key = ?', [PACING_KEY]).catch(() => null);
+  let raw = {};
+  try { raw = row?.value ? JSON.parse(row.value) : {}; } catch { /* valor inválido: usa o padrão */ }
+  return normalizePacing(raw);
+}
+
+export async function savePacing(body) {
+  const p = normalizePacing({ ...(await getPacing()), ...body });
+  await run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value', [PACING_KEY, JSON.stringify(p)]);
+  return p;
+}
+
+const kindsList = PACED_KINDS.map((k) => `'${k}'`).join(', ');
+async function pacedCounts() {
+  const r = await get(`
+    SELECT COUNT(*) FILTER (WHERE created_at > now() - interval '1 hour') AS hour,
+           COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours') AS day,
+           MAX(created_at) AS last
+    FROM notifications_sent WHERE kind IN (${kindsList}) AND created_at > now() - interval '24 hours'`);
+  return { hour: Number(r?.hour || 0), day: Number(r?.day || 0), last: r?.last || null };
+}
+
+const localHour = () => Number(new Date().toLocaleString('en-US', { timeZone: TZ, hour: 'numeric', hourCycle: 'h23' }));
+const inWindow = (p) => { const h = localHour(); return h >= p.hour_start && h < p.hour_end; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let paceChain = Promise.resolve();
+let lastPacedAt = 0;
+let queued = 0;
+
+/** Situação da fila para o painel. */
+export async function pacingStatus() {
+  const [config, counts] = await Promise.all([getPacing(), pacedCounts().catch(() => ({ hour: 0, day: 0, last: null }))]);
+  return { config, defaults: PACING_DEFAULTS, sent_last_hour: counts.hour, sent_last_24h: counts.day, last_sent_at: counts.last, waiting: queued, in_window: inWindow(config) };
+}
+
+/**
+ * Envia um aviso programado para o cliente no máximo uma vez (kind + assinante + referência), respeitando
+ * a fila. Se o limite da hora/dia já foi atingido ou estiver fora do horário, não envia agora: o aviso
+ * fica para a próxima conferência (de hora em hora / a cada 10 min).
+ */
+export async function sendScheduled(kind, subscriberId, ref, phone, text, opts = {}) {
+  queued++;
+  const job = paceChain.then(async () => {
+    try {
+      const already = await get('SELECT 1 AS x FROM notifications_sent WHERE kind = ? AND subscriber_id = ? AND ref = ?', [kind, subscriberId, ref]);
+      if (already) return false;
+      const p = await getPacing();
+      if (p.on) {
+        if (!inWindow(p)) return false;
+        const c = await pacedCounts();
+        if (c.hour >= p.per_hour || c.day >= p.per_day) return false;
+        const gap = (p.gap_min + Math.random() * (p.gap_max - p.gap_min)) * 1000;
+        const wait = lastPacedAt + gap - Date.now();
+        if (wait > 0) await sleep(wait);
+        if (!inWindow(p)) return false;
+      }
+      if (!(await claim(kind, subscriberId, ref))) return false;
+      const ok = await notifyCustomer(phone, text, opts);
+      lastPacedAt = Date.now();
+      if (!ok) await unclaim(kind, subscriberId, ref);
+      return ok;
+    } finally {
+      queued--;
+    }
+  });
+  paceChain = job.catch(() => {});
+  return job;
+}
+
 const addMonths = (month, n) => {
   const [y, m] = month.split('-').map(Number);
   const d = new Date(Date.UTC(y, m - 1 + n, 1));
@@ -243,14 +348,14 @@ const daysBetween = (fromISO, toISO) => Math.round((Date.parse(toISO) - Date.par
  *  - cliente: lembrete REMINDER_DAYS dias antes do vencimento (padrão 3), com o link para pagar;
  *  - admin:   aviso 1 dia antes do vencimento;
  *  - cliente e admin: aviso de atraso no dia seguinte ao vencimento.
- * Cada aviso sai no máximo uma vez por mensalidade. Só envia das 9h às 20h (fuso NOTIFY_TIMEZONE).
+ * Cada aviso sai no máximo uma vez por mensalidade. Só envia no horário configurado no painel (padrão 9h às 20h, fuso NOTIFY_TIMEZONE),
+ * e os avisos para clientes saem pela fila com intervalo (ver sendScheduled).
  * Se o servidor estiver desligado no dia exato, o aviso sai na próxima conferência dentro da janela.
  */
 export async function runDailyNotices() {
   if (!canSend) return;
   const now = new Date();
-  const hour = Number(now.toLocaleString('en-US', { timeZone: TZ, hour: 'numeric', hourCycle: 'h23' }));
-  if (hour < 9 || hour >= 20) return;
+  if (!inWindow(await getPacing())) return; // horário de envio configurado no painel (padrão 9h às 20h)
   const today = now.toLocaleDateString('sv-SE', { timeZone: TZ });
   const thisMonth = today.slice(0, 7);
   const nextMonth = addMonths(thisMonth, 1);
@@ -314,8 +419,8 @@ async function runCancellations(today) {
       continue;
     }
 
-    if (daysLeft <= RETENTION_DAYS && !s.retention_answer && s.phone && canSend && (await claim('retencao', s.id, String(s.cancel_at)))) {
-      const ok = await notifyCustomer(s.phone, [
+    if (daysLeft <= RETENTION_DAYS && !s.retention_answer && s.phone && canSend) {
+      await sendScheduled('retencao', s.id, String(s.cancel_at), s.phone, [
         `Oi, ${firstName(s.name)}! 👋`,
         '',
         `Você cancelou o plano *${s.plan_name}*, e seu acesso vai até *${until}*.`,
@@ -325,7 +430,6 @@ async function runCancellations(today) {
         '👉 *SIM* — para continuar',
         '👉 *NÃO* — para encerrar no dia ' + until,
       ].join('\n'), { force: true });
-      if (!ok) await unclaim('retencao', s.id, String(s.cancel_at));
     }
   }
 }
@@ -424,8 +528,8 @@ async function noticesFor(s, month, daysLeft, due) {
 
   // Cliente ainda sem renovação automática (pagava por Pix ou cartão avulso): 5 dias antes do vencimento,
   // avisa que a partir desta mensalidade o pagamento passa a ser automático no cartão de crédito.
-  if (daysLeft > REMINDER_DAYS && daysLeft <= CARD_NOTICE_DAYS && s.phone && CUSTOMER_ON && (await claim('aviso_cartao', s.id, month))) {
-    const ok = await notifyCustomer(s.phone, [
+  if (daysLeft > REMINDER_DAYS && daysLeft <= CARD_NOTICE_DAYS && s.phone && CUSTOMER_ON) {
+    await sendScheduled('aviso_cartao', s.id, month, s.phone, [
       `Olá, ${firstName(s.name)}! 👋`,
       '',
       `Um aviso rápido sobre a sua assinatura do *${s.plan_name}*:`,
@@ -442,12 +546,11 @@ async function noticesFor(s, month, daysLeft, due) {
       '',
       'Qualquer dúvida, é só responder esta mensagem.',
     ].join('\n'));
-    if (!ok) await unclaim('aviso_cartao', s.id, month);
   }
 
   // Cliente: 3 dias antes (ou assim que entrar na janela)
-  if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON && (await claim('lembrete', s.id, month))) {
-    const ok = await notifyCustomer(s.phone, [
+  if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON) {
+    await sendScheduled('lembrete', s.id, month, s.phone, [
       `Olá, ${firstName(s.name)}! 👋`,
       '',
       daysLeft === 0
@@ -462,7 +565,6 @@ async function noticesFor(s, month, daysLeft, due) {
       '',
       'Se já pagou, desconsidere esta mensagem. 😉',
     ].filter((l) => l !== null).join('\n'));
-    if (!ok) await unclaim('lembrete', s.id, month);
   }
 
   // Admin: 1 dia antes (ou no próprio dia, se a conferência de véspera não rodou)
@@ -481,8 +583,8 @@ async function noticesFor(s, month, daysLeft, due) {
 
   // Atraso: dia seguinte ao vencimento
   if (daysLeft < 0) {
-    if (s.phone && CUSTOMER_ON && (await claim('atraso_cliente', s.id, month))) {
-      const ok = await notifyCustomer(s.phone, [
+    if (s.phone && CUSTOMER_ON) {
+      await sendScheduled('atraso_cliente', s.id, month, s.phone, [
         `Olá, ${firstName(s.name)}.`,
         '',
         `Não identificamos o pagamento da mensalidade do *${s.plan_name}* (${value}), que venceu em ${due}.`,
@@ -490,7 +592,6 @@ async function noticesFor(s, month, daysLeft, due) {
         '',
         'Se já pagou, desconsidere. Qualquer dúvida, é só responder aqui.',
       ].filter((l) => l !== null).join('\n'));
-      if (!ok) await unclaim('atraso_cliente', s.id, month);
     }
     if (whatsappConfigured && (await claim('atraso_admin', s.id, month))) {
       await notifyAdmin([
@@ -516,8 +617,8 @@ async function autopayNoticesFor(s, month, daysLeft, due) {
   const value = brl(s.price_cents);
   const card = s.card_last4 ? ` final *${s.card_last4}*` : '';
 
-  if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON && (await claim('lembrete', s.id, month))) {
-    const ok = await notifyCustomer(s.phone, [
+  if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON) {
+    await sendScheduled('lembrete', s.id, month, s.phone, [
       `Olá, ${firstName(s.name)}! 👋`,
       '',
       daysLeft === 0
@@ -527,12 +628,11 @@ async function autopayNoticesFor(s, month, daysLeft, due) {
       'É automático: você não precisa fazer nada. 😉',
       accountLink() ? `\nPara trocar o cartão ou ver seus pagamentos: ${accountLink()}` : null,
     ].filter((l) => l !== null).join('\n'));
-    if (!ok) await unclaim('lembrete', s.id, month);
   }
 
   if (daysLeft <= -2) {
-    if (s.phone && CUSTOMER_ON && (await claim('atraso_cliente', s.id, month))) {
-      const ok = await notifyCustomer(s.phone, [
+    if (s.phone && CUSTOMER_ON) {
+      await sendScheduled('atraso_cliente', s.id, month, s.phone, [
         `Olá, ${firstName(s.name)}.`,
         '',
         `A cobrança automática da mensalidade do *${s.plan_name}* (${value}) no seu cartão${card} *não foi aprovada*.`,
@@ -541,7 +641,6 @@ async function autopayNoticesFor(s, month, daysLeft, due) {
         '',
         'Qualquer dúvida, é só responder esta mensagem.',
       ].filter((l) => l !== null).join('\n'));
-      if (!ok) await unclaim('atraso_cliente', s.id, month);
     }
     if (whatsappConfigured && (await claim('atraso_admin', s.id, month))) {
       await notifyAdmin([
@@ -564,13 +663,12 @@ async function autopayNoticesFor(s, month, daysLeft, due) {
  * Cliente novo que escolheu o plano (status "aguardando") e ainda não fez nenhum pagamento:
  *  - 1 hora depois: lembrete com o link para pagar;
  *  - 24 horas depois: último lembrete + aviso para o admin.
- * Se ele pagar antes, nada é enviado. Só envia das 8h às 21h (fuso NOTIFY_TIMEZONE);
- * fora desse horário, a mensagem espera até as 8h. Considera só pedidos dos últimos 7 dias.
+ * Se ele pagar antes, nada é enviado. Só envia no horário configurado no painel (padrão 9h às 20h);
+ * fora desse horário, a mensagem espera o próximo horário de envio. Considera só pedidos dos últimos 7 dias.
  */
 export async function runCheckoutReminders() {
   if (!canSend) return;
-  const hour = Number(new Date().toLocaleString('en-US', { timeZone: TZ, hour: 'numeric', hourCycle: 'h23' }));
-  if (hour < 8 || hour >= 21) return;
+  if (!inWindow(await getPacing())) return;
 
   const pending = await all(`
     SELECT s.id, s.name, s.email, s.phone, s.created_at, p.name AS plan_name, p.price_cents,
@@ -587,8 +685,8 @@ export async function runCheckoutReminders() {
 
     if (s.hours >= 24) {
       await claim('checkout_1h', s.id, 'inicio'); // passou do prazo do 1º lembrete: vai direto para o último
-      if (s.phone && CUSTOMER_ON && (await claim('checkout_24h', s.id, 'inicio'))) {
-        const ok = await notifyCustomer(s.phone, [
+      if (s.phone && CUSTOMER_ON) {
+        await sendScheduled('checkout_24h', s.id, 'inicio', s.phone, [
           `Oi, ${firstName(s.name)}! 😊`,
           '',
           `Sua assinatura do *${s.plan_name}* (${value}/mês) ainda está esperando o pagamento para ser ativada.`,
@@ -596,7 +694,6 @@ export async function runCheckoutReminders() {
           '',
           'Se tiver qualquer dúvida ou dificuldade para pagar, é só responder esta mensagem que a gente te ajuda.',
         ].filter((l) => l !== null).join('\n'));
-        if (!ok) await unclaim('checkout_24h', s.id, 'inicio');
       }
       if (whatsappConfigured && (await claim('checkout_admin', s.id, 'inicio'))) {
         await notifyAdmin([
@@ -609,8 +706,8 @@ export async function runCheckoutReminders() {
           s.phone && CUSTOMER_ON ? '_Ele recebeu lembretes com 1h e 24h. Vale um contato pessoal._' : '⚠️ _Cliente sem WhatsApp cadastrado: não recebeu lembretes._',
         ].join('\n'));
       }
-    } else if (s.phone && CUSTOMER_ON && (await claim('checkout_1h', s.id, 'inicio'))) {
-      const ok = await notifyCustomer(s.phone, [
+    } else if (s.phone && CUSTOMER_ON) {
+      await sendScheduled('checkout_1h', s.id, 'inicio', s.phone, [
         `Oi, ${firstName(s.name)}! 👋`,
         '',
         `Vi que você escolheu o plano *${s.plan_name}* (${value}/mês), mas o pagamento ainda não foi concluído.`,
@@ -618,7 +715,6 @@ export async function runCheckoutReminders() {
         '',
         'Precisa de ajuda? É só responder esta mensagem.',
       ].filter((l) => l !== null).join('\n'));
-      if (!ok) await unclaim('checkout_1h', s.id, 'inicio');
     }
   }
 }
@@ -626,8 +722,10 @@ export async function runCheckoutReminders() {
 /** Liga as rotinas: vencimentos de hora em hora; quem não pagou o 1º pedido a cada 10 min. */
 export function startNoticeScheduler() {
   if (!canSend) return;
-  const daily = () => runDailyNotices().catch((e) => console.error('Avisos automáticos:', e.message));
-  const checkout = () => runCheckoutReminders().catch((e) => console.error('Lembretes de pagamento:', e.message));
+  // Uma rodada de cada vez: com a fila de intervalos, uma rodada pode levar vários minutos.
+  const once = (fn, label) => { let busy = false; return async () => { if (busy) return; busy = true; try { await fn(); } catch (e) { console.error(label, e.message); } finally { busy = false; } }; };
+  const daily = once(runDailyNotices, 'Avisos automáticos:');
+  const checkout = once(runCheckoutReminders, 'Lembretes de pagamento:');
   setTimeout(() => { daily(); checkout(); }, 60_000).unref();
   setInterval(daily, 60 * 60_000).unref();
   setInterval(checkout, 10 * 60_000).unref();

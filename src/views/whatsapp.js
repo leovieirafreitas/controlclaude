@@ -133,7 +133,27 @@ async function startQr() {
   await fetchQr();
 }
 
+// ---------------------------------------------------------------- intervalo entre os avisos automáticos
+
+const PACING_FIELDS = ['gap_min', 'gap_max', 'per_hour', 'per_day', 'hour_start', 'hour_end'];
+
+function renderPacing(st) {
+  const f = $('#form-pacing');
+  f.elements.on.checked = st.config.on;
+  for (const k of PACING_FIELDS) f.elements[k].value = st.config[k];
+  for (const k of PACING_FIELDS) f.elements[k].disabled = !st.config.on;
+  const last = st.last_sent_at ? new Date(st.last_sent_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : 'nenhum';
+  $('#pacing-status').innerHTML = st.config.on
+    ? `Enviados na última hora: <strong>${st.sent_last_hour}</strong> de ${st.config.per_hour} · nas últimas 24h: <strong>${st.sent_last_24h}</strong> de ${st.config.per_day} · último envio: ${esc(last)}${st.waiting ? ` · <strong>${st.waiting}</strong> na fila agora` : ''}${st.in_window ? '' : ' · fora do horário de envio'}`
+    : '<strong>Desativado:</strong> os avisos saem todos de uma vez, sem pausa (maior risco de bloqueio).';
+}
+
+async function loadPacing() {
+  try { renderPacing(await api.pacing()); } catch { $('#pacing-status').textContent = 'Não foi possível carregar a configuração.'; }
+}
+
 export async function loadWhatsapp() {
+  loadPacing();
   if (pollTimer) return; // QR na tela: não redesenha
   $('#wa-status').innerHTML = '<p class="muted">Verificando conexão…</p>';
   try {
@@ -148,6 +168,21 @@ export async function loadWhatsapp() {
 const load = loadWhatsapp;
 
 export function initWhatsapp() {
+  const pf = $('#form-pacing');
+  pf.elements.on.addEventListener('change', () => { for (const k of PACING_FIELDS) pf.elements[k].disabled = !pf.elements.on.checked; });
+  pf.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = { on: pf.elements.on.checked };
+    for (const k of PACING_FIELDS) if (pf.elements[k].value !== '') body[k] = Number(pf.elements[k].value);
+    const btn = pf.querySelector('button');
+    btn.disabled = true;
+    try {
+      const st = await api.savePacing(body);
+      renderPacing(st);
+      toast(st.config.on ? 'Intervalo entre os avisos ativado.' : 'Intervalo desativado.');
+    } catch { /* toast já mostrado */ } finally { btn.disabled = false; }
+  });
+
   $('#wa-status').addEventListener('click', async (e) => {
     const id = e.target.closest('button')?.id;
     if (!id) return;
