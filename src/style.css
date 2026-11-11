@@ -300,7 +300,10 @@ label.check input { width: auto; }
 .pm-inline.m-pix .pm-icon { color: #32bcad; }
 
 /* ---------- notificações no celular (app do painel) */
-.push-btn { position: relative; padding-inline: 10px; }
+.push-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; padding-inline: 8px; color: var(--text); }
+.ui-icon { display: block; flex: none; }
+.push-inline-icon { display: inline-flex; vertical-align: -3px; color: var(--accent); }
+.push-pill-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .push-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: transparent; }
 .push-dot.on { background: #2e9e5b; box-shadow: 0 0 0 2px var(--surface); }
 .push-dlg { padding: 20px; display: grid; gap: 12px; }

@@ -113,7 +113,7 @@ export async function notifyPayment({ subscriberId, month, amountCents, method, 
 
   // Notificação no app do painel (celular do admin)
   firePush({
-    title: first ? '🎉 Nova assinatura!' : '💰 Pagamento recebido',
+    title: first ? 'Nova assinatura' : 'Pagamento recebido',
     body: `${s.name} · ${s.plan_name}\n${brl(amountCents)} via ${how}`,
     tag: `pagamento-${s.id}-${month}`,
     url: '/admin#payments',
@@ -217,7 +217,7 @@ export async function notifyCardRejected(subscriberId, { once = false, message =
 
 /** Cliente criou a conta (ainda sem pagar). */
 export function notifySignup({ name, email, phone, birth_date }) {
-  firePush({ title: '🆕 Novo cliente cadastrado', body: `${name}\n${email}${phone ? ' · ' + phone : ''}\nAinda sem pagamento`, tag: `cadastro-${email}`, url: '/admin#customers' });
+  firePush({ title: 'Novo cliente cadastrado', body: `${name}\n${email}${phone ? ' · ' + phone : ''}\nAinda sem pagamento`, tag: `cadastro-${email}`, url: '/admin#customers' });
   if (!whatsappConfigured) return;
   fire(notifyAdmin([
     '🆕 *Nova conta criada* (ainda sem pagamento)',

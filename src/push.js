@@ -2,6 +2,7 @@
 // iPhone: precisa do iOS 16.4+ e do painel adicionado à Tela de Início (abrir pelo ícone, não pelo Safari).
 import { api } from './api.js';
 import { $, esc, toast } from './utils.js';
+import { ICON_BELL, ICON_SHARE } from './icons.js';
 
 const SW_URL = '/admin-sw.js';
 const SCOPE = '/admin';
@@ -43,9 +44,9 @@ function installSteps() {
     <p>Para receber notificações no iPhone, instale o painel como app:</p>
     <ol class="push-steps">
       <li>Abra <strong>${esc(location.origin)}/admin</strong> no <strong>Safari</strong>.</li>
-      <li>Toque em <strong>Compartilhar</strong> <span aria-hidden="true">(o quadrado com a seta ⬆️)</span>.</li>
+      <li>Toque em <strong>Compartilhar</strong> <span class="push-inline-icon">${ICON_SHARE}</span> (o quadrado com a seta para cima).</li>
       <li>Toque em <strong>Adicionar à Tela de Início</strong> → <strong>Adicionar</strong>.</li>
-      <li>Abra o app <strong>Control Claude</strong> pelo ícone na tela, entre com seu e-mail e toque no <strong>🔔</strong> de novo.</li>
+      <li>Abra o app <strong>Control Claude</strong> pelo ícone na tela, entre com seu e-mail e toque no sino <span class="push-inline-icon">${ICON_BELL}</span> de novo.</li>
     </ol>
     <p class="muted small">Precisa do iOS 16.4 ou mais novo (Ajustes → Geral → Sobre).</p>`;
 }
@@ -79,7 +80,7 @@ async function render() {
 
   if (known) {
     body.innerHTML = `
-      <p><span class="push-pill on">● Ativadas neste aparelho</span></p>
+      <p><span class="push-pill on"><span class="push-pill-dot"></span>Ativadas neste aparelho</span></p>
       ${what}${otherLine}
       <div class="wa-actions">
         <button class="btn primary" type="button" id="push-test">Enviar notificação de teste</button>
@@ -151,7 +152,7 @@ export function initPush() {
   });
 }
 
-/** Depois do login: registra o service worker e acende a bolinha do 🔔 se já estiver ativo. */
+/** Depois do login: registra o service worker e acende a bolinha do sino se já estiver ativo. */
 export async function refreshPush() {
   if (!supported()) return setDot(false);
   try {
