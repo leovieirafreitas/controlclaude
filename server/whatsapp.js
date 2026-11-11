@@ -91,7 +91,7 @@ const fire = (p) => { Promise.resolve(p).catch(() => {}); };
 
 async function subscriberInfo(subscriberId) {
   return get(`
-    SELECT s.id, s.name, s.email, s.phone, s.birth_date, s.due_day, s.start_date, p.name AS plan_name, p.price_cents,
+    SELECT s.id, s.name, s.email, s.phone, s.birth_date, s.due_day, s.start_date, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            s.card_last4, s.next_charge_date,
            (SELECT COUNT(*) FROM payments WHERE subscriber_id = s.id) AS payments_count
     FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [subscriberId]);
@@ -390,13 +390,13 @@ export async function runDailyNotices() {
   const nextMonth = addMonths(thisMonth, 1);
 
   const subs = await all(`
-    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.start_date, p.name AS plan_name, p.price_cents,
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.start_date, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            s.autopay_status, s.card_last4,
            (SELECT MAX(ref_month) FROM payments WHERE subscriber_id = s.id) AS last_paid_month,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_next
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
-    WHERE s.status = 'ativo' AND p.price_cents > 0 AND s.cancel_at IS NULL`, [thisMonth, nextMonth]);
+    WHERE s.status = 'ativo' AND COALESCE(s.monthly_cents, p.price_cents) > 0 AND s.cancel_at IS NULL`, [thisMonth, nextMonth]);
 
   await runCancellations(today);
 
@@ -421,7 +421,7 @@ export async function runDailyNotices() {
  */
 async function runCancellations(today) {
   const list = await all(`
-    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, s.retention_answer, p.name AS plan_name, p.price_cents,
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, s.retention_answer, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            s.mp_preapproval_id, s.autopay_status
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
     WHERE s.status = 'ativo' AND s.cancel_at IS NOT NULL`);
@@ -474,7 +474,7 @@ export async function handleIncomingMessage(fromNumber, text) {
   if (!yes && !no) return 'ignorado';
 
   const candidates = await all(`
-    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, p.name AS plan_name, p.price_cents,
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.cancel_at, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            s.mp_preapproval_id, s.autopay_status, s.card_last4
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
     WHERE s.status = 'ativo' AND s.cancel_at IS NOT NULL AND s.retention_answer IS NULL
@@ -632,10 +632,10 @@ export async function runCheckoutReminders() {
   if (!inWindow(await getPacing())) return;
 
   const pending = await all(`
-    SELECT s.id, s.name, s.email, s.phone, s.created_at, p.name AS plan_name, p.price_cents,
+    SELECT s.id, s.name, s.email, s.phone, s.created_at, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            EXTRACT(EPOCH FROM (now() - s.created_at)) / 3600 AS hours
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
-    WHERE s.status = 'aguardando' AND p.price_cents > 0
+    WHERE s.status = 'aguardando' AND COALESCE(s.monthly_cents, p.price_cents) > 0
       AND s.created_at > now() - interval '7 days'
       AND s.created_at < now() - interval '1 hour'
       AND NOT EXISTS (SELECT 1 FROM payments WHERE subscriber_id = s.id)`);

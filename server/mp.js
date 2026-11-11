@@ -72,7 +72,7 @@ function firstPayment(order) {
  */
 async function activateIfPaid(subId, month, paidNowCents) {
   const s = await get(`
-    SELECT s.id, s.status, p.price_cents,
+    SELECT s.id, s.status, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid
     FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [month, subId]);
   if (!s) return false;
@@ -262,7 +262,7 @@ export async function setAutopayAmount(sub, priceCents) {
 async function recordAutopayCharge(subId, invoice) {
   const pay = invoice.payment || {};
   if (pay.status !== 'approved' || !pay.id) return false;
-  const sub = await get(`SELECT s.*, p.price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [subId]);
+  const sub = await get(`SELECT s.*, COALESCE(s.monthly_cents, p.price_cents) AS price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [subId]);
   if (!sub) return false;
   if (await get('SELECT 1 AS x FROM payments WHERE mp_payment_id = ?', [String(pay.id)])) return false;
 
@@ -425,10 +425,11 @@ async function adoptPreapproval(pre) {
   if (pre.status !== 'authorized') return null;
 
   // O valor do link precisa cobrir o preço do plano atual (o cliente pode ter trocado de plano depois de gerar o link)
-  const plan = await get('SELECT price_cents FROM plans WHERE id = ?', [sub.plan_id]);
+  const planRow = await get('SELECT price_cents FROM plans WHERE id = ?', [sub.plan_id]);
+  const plan = planRow && { price_cents: sub.monthly_cents ?? planRow.price_cents }; // valor travado do assinante
   const linkCents = Math.round(Number(pre.auto_recurring?.transaction_amount || 0) * 100);
   if (!plan || linkCents < Number(plan.price_cents)) {
-    console.warn(`Link de assinatura com valor menor que o plano (assinante ${sub.id}): link ${linkCents}, plano ${plan?.price_cents}`);
+    console.warn(`Link de assinatura com valor menor que a mensalidade (assinante ${sub.id}): link ${linkCents}, mensalidade ${plan?.price_cents}`);
     await mp(`/preapproval/${enc(pre.id)}`, { method: 'PUT', body: { status: 'cancelled' } })
       .catch((e) => console.error('Mercado Pago (cancelar link com valor errado):', e.message));
     await run('UPDATE subscribers SET mp_preapproval_pending = NULL WHERE id = ? AND mp_preapproval_pending = ?', [sub.id, pre.id]);

@@ -18,7 +18,7 @@ function render() {
     <tr>
       <td><strong>${esc(s.name)}</strong>${s.notes ? `<div class="muted">${esc(s.notes)}</div>` : ''}</td>
       <td>${esc(s.email)}<div class="muted">${esc(s.phone)}${s.birth_date ? ` · nasc. ${fmtDate(s.birth_date)}` : ''}</div></td>
-      <td>${esc(s.plan_name)} <span class="muted">· ${brl(s.price_cents)}</span></td>
+      <td>${esc(s.plan_name)} <span class="muted">· ${brl(s.price_cents)}</span>${s.plan_price_cents != null && s.plan_price_cents !== s.price_cents ? `<div class="muted small" title="Valor travado de quando assinou">preço atual do plano: ${brl(s.plan_price_cents)}</div>` : ''}</td>
       <td>${fmtDate(s.start_date)}</td>
       <td>dia ${s.due_day}</td>
       <td>${badge(s.status)}${autopayBadge(s)}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
@@ -50,6 +50,11 @@ async function openSubscriber(sub) {
   f.due_day.value = sub?.due_day ?? 10;
   f.status.value = sub?.status ?? 'ativo';
   f.notes.value = sub?.notes ?? '';
+  // valor travado do assinante (cadastro novo: preço do plano escolhido)
+  const planPrice = (id) => plans.find((p) => p.id === Number(id))?.price_cents;
+  const toReais = (c) => (c == null ? '' : (c / 100).toFixed(2).replace('.', ','));
+  f.monthly.value = toReais(sub ? sub.price_cents : planPrice(f.plan_id.value));
+  f.plan_id.onchange = () => { f.monthly.value = toReais(planPrice(f.plan_id.value)); };
   $('#dlg-sub').showModal();
 }
 
@@ -74,7 +79,13 @@ export function initSubscribers(onChange) {
     }
   });
 
-  bindDialogForm($('#form-sub'), async ({ id, ...body }) => {
+  bindDialogForm($('#form-sub'), async ({ id, monthly, ...body }) => {
+    const v = String(monthly || '').replace(/[^\d,.]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+    if (v !== '') {
+      const cents = Math.round(Number(v) * 100);
+      if (!Number.isFinite(cents) || cents < 0) { toast('Valor da mensalidade inválido.'); throw new Error('valor'); }
+      body.monthly_cents = cents;
+    }
     await api.saveSubscriber(id, body);
     toast('Assinante salvo');
     onChange();

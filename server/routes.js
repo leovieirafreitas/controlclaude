@@ -108,7 +108,12 @@ api.post('/plans', h(async ({ body }) => {
 }));
 
 api.put('/plans/:id', h(async ({ body, params }) => {
-  await run('UPDATE plans SET name = ?, price_cents = ?, description = ?, active = ?, features = ?, featured = ?, max_licenses = ? WHERE id = ?', [...planValues(body), Number(params.id)]);
+  const values = planValues(body);
+  await run('UPDATE plans SET name = ?, price_cents = ?, description = ?, active = ?, features = ?, featured = ?, max_licenses = ? WHERE id = ?', [...values, Number(params.id)]);
+  // Preço novo vale para quem assinar daqui em diante. Quem já pagou continua com o valor que assinou.
+  // Só quem escolheu este plano e ainda não pagou nada passa para o preço novo.
+  await run(`UPDATE subscribers s SET monthly_cents = ? WHERE s.plan_id = ? AND s.status = 'aguardando'
+             AND NOT EXISTS (SELECT 1 FROM payments WHERE subscriber_id = s.id)`, [values[1], Number(params.id)]);
   return { ok: true };
 }));
 
@@ -155,15 +160,31 @@ async function subscriberValues(body) {
   ];
 }
 
+/**
+ * Valor da mensalidade do assinante (travado). O admin pode digitar; se não digitar:
+ * mantém o valor que ele já tinha, ou usa o preço atual do plano quando o plano mudou ou é cadastro novo.
+ */
+async function monthlyFor(body, before = null) {
+  if (body.monthly_cents !== undefined && body.monthly_cents !== null && body.monthly_cents !== '') {
+    const v = Math.round(Number(body.monthly_cents));
+    if (!Number.isFinite(v) || v < 0 || v > 10_000_000) throw new ApiError(400, 'Valor da mensalidade inválido.');
+    return v;
+  }
+  const planId = Number(body.plan_id);
+  if (before && Number(before.plan_id) === planId && before.monthly_cents != null) return before.monthly_cents;
+  const plan = await get('SELECT price_cents FROM plans WHERE id = ?', [planId]);
+  return plan ? plan.price_cents : null;
+}
+
 api.get('/subscribers', h(() => all(`
-  SELECT s.*, p.name AS plan_name, p.price_cents
+  SELECT s.*, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, p.price_cents AS plan_price_cents
   FROM subscribers s JOIN plans p ON p.id = s.plan_id
   ORDER BY s.status = 'aguardando' DESC, lower(s.name)`)));
 
 // Contas criadas na área do assinante (/conta): cadastro, e-mail confirmado e situação do plano
 api.get('/customers', h(() => all(`
   SELECT c.id, c.name, c.email, c.phone, c.birth_date, c.created_at, c.email_verified_at,
-         s.id AS subscriber_id, s.status, s.cancel_at, s.autopay_status, s.card_last4, s.next_charge_date, p.name AS plan_name, p.price_cents,
+         s.id AS subscriber_id, s.status, s.cancel_at, s.autopay_status, s.card_last4, s.next_charge_date, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
          (SELECT MAX(paid_at) FROM payments pay WHERE pay.subscriber_id = s.id) AS last_paid_at
   FROM customers c
   LEFT JOIN LATERAL (SELECT * FROM subscribers WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) s ON true
@@ -180,8 +201,9 @@ api.post('/subscribers/:id/pix', h(async ({ params }) => {
   if (!mpConfigured) throw new ApiError(503, 'Mercado Pago não configurado no servidor.');
   const sub = await get('SELECT * FROM subscribers WHERE id = ?', [Number(params.id)]);
   if (!sub) throw new ApiError(404, 'Assinante não encontrado.');
-  const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
-  if (!plan || plan.price_cents <= 0) throw new ApiError(400, 'O plano deste assinante não tem valor para cobrar.');
+  const planRow = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
+  const plan = planRow && { ...planRow, price_cents: sub.monthly_cents ?? planRow.price_cents }; // valor travado do assinante
+  if (!plan || plan.price_cents <= 0) throw new ApiError(400, 'Este assinante não tem valor de mensalidade para cobrar.');
   if (!sub.email) throw new ApiError(400, 'Cadastre o e-mail deste assinante (Editar) para gerar o Pix: o Mercado Pago exige.');
   const { billingMonth } = await import('./member.js');
   const month = await billingMonth(sub, plan.price_cents);
@@ -209,16 +231,17 @@ api.get('/subscribers/:id/pix/:order', h(async ({ params }) => {
 
 api.post('/subscribers', h(async ({ body }) => {
   const r = await run(`
-    INSERT INTO subscribers (name, email, phone, plan_id, start_date, due_day, status, notes, birth_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, await subscriberValues(body));
+    INSERT INTO subscribers (name, email, phone, plan_id, start_date, due_day, status, notes, birth_date, monthly_cents)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, [...(await subscriberValues(body)), await monthlyFor(body)]);
   return { id: r.rows[0].id };
 }));
 
 api.put('/subscribers/:id', h(async ({ body, params }) => {
-  const before = await get('SELECT s.*, p.price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?', [Number(params.id)]);
+  const before = await get(`SELECT s.*, COALESCE(s.monthly_cents, p.price_cents) AS price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [Number(params.id)]);
+  if (!before) throw new ApiError(404, 'Assinante não encontrado');
   await run(`
-    UPDATE subscribers SET name = ?, email = ?, phone = ?, plan_id = ?, start_date = ?, due_day = ?, status = ?, notes = ?, birth_date = ?
-    WHERE id = ?`, [...(await subscriberValues(body)), Number(params.id)]);
+    UPDATE subscribers SET name = ?, email = ?, phone = ?, plan_id = ?, start_date = ?, due_day = ?, status = ?, notes = ?, birth_date = ?, monthly_cents = ?
+    WHERE id = ?`, [...(await subscriberValues(body)), await monthlyFor(body, before), Number(params.id)]);
   // Admin mudou o status na mão: um cancelamento agendado antigo deixa de valer
   await run(`UPDATE subscribers SET cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL
              WHERE id = ? AND cancel_at IS NOT NULL AND (status <> 'ativo' OR cancel_at <= current_date)`, [Number(params.id)]);
@@ -233,7 +256,7 @@ api.put('/subscribers/:id', h(async ({ body, params }) => {
  */
 async function syncAutopayWithStatus(before, id) {
   if (!before?.mp_preapproval_id || before.autopay_status === 'cancelled') return;
-  const sub = await get('SELECT s.*, p.price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?', [id]);
+  const sub = await get(`SELECT s.*, COALESCE(s.monthly_cents, p.price_cents) AS price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [id]);
   const want = sub.status === 'cancelado' ? 'cancelled'
     : sub.status === 'pausado' ? 'paused'
     : sub.status === 'ativo' && !sub.cancel_at ? 'authorized' : null;
@@ -279,7 +302,7 @@ api.get('/payments', h(({ query }) => {
 api.post('/payments', h(async ({ body }) => {
   required(body, 'subscriber_id', 'ref_month');
   const sub = await get(`
-    SELECT s.id, p.price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [Number(body.subscriber_id)]);
+    SELECT s.id, COALESCE(s.monthly_cents, p.price_cents) AS price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [Number(body.subscriber_id)]);
   if (!sub) throw new ApiError(400, 'Assinante não encontrado');
   const amount = body.amount === undefined || body.amount === '' ? sub.price_cents : toCents(body.amount);
   const r = await run(`
@@ -315,7 +338,7 @@ api.get('/dashboard', h(async ({ query }) => {
   // Todas as consultas do painel em paralelo (cada ida ao banco custa ~180 ms)
   const [subs, totals, byMethod, byPlan] = await Promise.all([all(`
     SELECT s.id, s.name, s.email, s.phone, s.due_day, s.status, s.start_date, s.cancel_at, s.retention_answer,
-           p.name AS plan_name, p.price_cents,
+           p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            COALESCE((SELECT SUM(amount_cents) FROM payments WHERE subscriber_id = s.id AND ref_month = ?), 0) AS paid_cents,
            (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS last_paid_at,
            (SELECT string_agg(DISTINCT method, ',') FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_methods
