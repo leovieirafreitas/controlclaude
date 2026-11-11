@@ -62,6 +62,9 @@ function checkNewPassword(pw) {
   return String(pw);
 }
 
+/** Plano com o valor travado do assinante (mudar o preço do plano não muda quem já assina). */
+const pricedPlan = (plan, sub) => plan && { ...plan, price_cents: sub?.monthly_cents ?? plan.price_cents };
+
 const customerByEmail = (email) => get('SELECT * FROM customers WHERE email = ?', [email]);
 const subscriptionOf = (customerId) => get('SELECT * FROM subscribers WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [customerId]);
 
@@ -255,7 +258,7 @@ async function memberViewByEmail(email) {
   const [customer, sub, plans, payments] = await Promise.all([
     customerByEmail(email),
     get(`
-      SELECT s.*, p.name AS plan_name, p.price_cents, p.description AS plan_description, ${SOLD_OUT_SQL} AS plan_sold_out,
+      SELECT s.*, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, p.description AS plan_description, ${SOLD_OUT_SQL} AS plan_sold_out,
              (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this_month
       FROM subscribers s
       JOIN plans p ON p.id = s.plan_id
@@ -343,16 +346,19 @@ memberApi.post('/subscribe', h(async (req) => {
   const today = todayISO();
   if (!sub) {
     await run(`
-      INSERT INTO subscribers (customer_id, name, email, phone, birth_date, plan_id, start_date, due_day, status, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando', 'Cadastro pela área do assinante')`,
-    [c.id, c.name, c.email, c.phone, c.birth_date, plan.id, today, Math.min(Number(today.slice(8, 10)), 28)]);
+      INSERT INTO subscribers (customer_id, name, email, phone, birth_date, plan_id, start_date, due_day, status, notes, monthly_cents)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando', 'Cadastro pela área do assinante', ?)`,
+    [c.id, c.name, c.email, c.phone, c.birth_date, plan.id, today, Math.min(Number(today.slice(8, 10)), 28), plan.price_cents]);
   } else if (sub.plan_id !== plan.id) {
-    await run("UPDATE subscribers SET plan_id = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END, mp_preapproval_pending = NULL WHERE id = ?", [plan.id, sub.id]);
+    await run("UPDATE subscribers SET plan_id = ?, monthly_cents = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END, mp_preapproval_pending = NULL WHERE id = ?", [plan.id, plan.price_cents, sub.id]);
     // Link de assinatura gerado para o plano anterior deixa de valer (o valor era outro)
     if (sub.mp_preapproval_pending) {
       cancelPreapproval(sub.mp_preapproval_pending).catch((e) => console.error('Mercado Pago (cancelar link antigo):', e.message));
     }
     await setAutopayAmount(sub, plan.price_cents).catch((e) => console.error('Mercado Pago (valor da renovação):', e.message));
+  } else if (sub.status === 'cancelado' || (sub.status === 'aguardando' && !(await get('SELECT 1 AS x FROM payments WHERE subscriber_id = ?', [sub.id])))) {
+    // voltou depois de cancelar, ou ainda não tinha pago nada: assina pelo preço atual do plano
+    await run('UPDATE subscribers SET monthly_cents = ? WHERE id = ?', [plan.price_cents, sub.id]);
   }
 
   const view = await memberView(c);
@@ -377,7 +383,7 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   const tries = await get(`SELECT COUNT(*) FILTER (WHERE created_at > now() - interval '1 hour') AS h, COUNT(*) AS d
     FROM checkouts WHERE subscriber_id = ? AND created_at > now() - interval '1 day'`, [sub.id]);
   if (Number(tries.h) >= 8 || Number(tries.d) >= 25) throw new ApiError(429, 'Muitas tentativas de pagamento. Aguarde um pouco ou fale com a gente no WhatsApp.');
-  const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
+  const plan = pricedPlan(await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]), sub);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
   if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
   // Pix: paga a mensalidade em aberto (sem renovação automática; o cliente paga mês a mês)
@@ -424,7 +430,7 @@ memberApi.post('/autopay-link', h(mpSafe(async (req) => {
   if (!mpConfigured) throw new ApiError(503, 'Pagamento online indisponível no momento.');
   const c = await currentCustomer(req);
   const sub = await requireSubscription(c);
-  const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
+  const plan = pricedPlan(await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]), sub);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
   if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
   if (sub.mp_preapproval_id && sub.autopay_status === 'authorized' && !sub.cancel_at) {
@@ -468,7 +474,7 @@ async function paidAccessUntil(sub) {
   const row = await get(`
     SELECT MAX(ref_month) AS m FROM (
       SELECT pay.ref_month FROM payments pay JOIN subscribers s ON s.id = pay.subscriber_id JOIN plans p ON p.id = s.plan_id
-      WHERE pay.subscriber_id = ? GROUP BY pay.ref_month, p.price_cents HAVING SUM(pay.amount_cents) >= p.price_cents
+      WHERE pay.subscriber_id = ? GROUP BY pay.ref_month, s.monthly_cents, p.price_cents HAVING SUM(pay.amount_cents) >= COALESCE(s.monthly_cents, p.price_cents)
     ) t`, [sub.id]);
   if (!row?.m) return null;
   const [y, m] = row.m.split('-').map(Number);

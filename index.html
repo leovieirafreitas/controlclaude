@@ -311,6 +311,8 @@
         <label>Data de nascimento<input name="birth_date" type="date"></label>
         <label>Plano *<select name="plan_id" required></select></label>
       </div>
+      <label>Valor da mensalidade (R$)<input name="monthly" type="text" inputmode="decimal" placeholder="Preço do plano"></label>
+      <p class="muted small sub-monthly-hint" id="sub-monthly-hint">Fica travado para este assinante: mudar o preço do plano não altera quem já assina.</p>
       <div class="row2">
         <label>Início *<input name="start_date" type="date" required></label>
         <label>Dia de vencimento *<input name="due_day" type="number" min="1" max="28" value="10" required></label>

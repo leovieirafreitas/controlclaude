@@ -179,3 +179,8 @@ alter table public.app_secrets enable row level security;
 alter table public.login_codes add column if not exists req_hash text;   -- HMAC do valor aleatório guardado em cookie no navegador
 alter table public.login_codes add column if not exists ip_hash  text;   -- HMAC do IP de quem pediu (limite por e-mail + IP)
 create index if not exists idx_login_codes_req on public.login_codes(scope, email, req_hash);
+
+-- v14: valor da mensalidade travado por assinante. Mudar o preço do plano só vale para quem assinar depois;
+-- quem já assina continua pagando o valor com que assinou.
+alter table public.subscribers add column if not exists monthly_cents integer check (monthly_cents is null or monthly_cents >= 0);
+update public.subscribers s set monthly_cents = p.price_cents from public.plans p where p.id = s.plan_id and s.monthly_cents is null;
