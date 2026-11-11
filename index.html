@@ -41,22 +41,33 @@
   </div>
 
   <!-- APP -->
-  <div id="app" class="hidden">
-    <header class="topbar">
-      <h1 class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></h1>
-      <nav id="tabs" class="tabs">
-        <button data-tab="dashboard" class="active">Dashboard</button>
-        <button data-tab="customers">Clientes <span class="new-dot hidden" id="cust-dot"></span></button>
-        <button data-tab="subscribers">Assinantes</button>
-        <button data-tab="payments">Pagamentos</button>
-        <button data-tab="plans">Planos</button>
-        <button data-tab="whatsapp">WhatsApp <span class="wa-dot" id="wa-dot"></span></button>
-      </nav>
-      <span class="muted user-email" id="user-email"></span>
-      <button id="push-btn" class="btn small push-btn" type="button" title="Notificações no celular" aria-label="Notificações no celular"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="push-dot" id="push-dot"></span></button>
-      <a href="/assinar" target="_blank" class="btn small sales-link">Página de vendas ↗</a>
-      <button id="logout" class="btn small">Sair</button>
+  <div id="app" class="hidden app-shell">
+    <!-- Barra do topo: só no celular (abre o menu lateral) -->
+    <header class="mobilebar">
+      <button id="menu-btn" class="icon-btn" type="button" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
+      <span class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></span>
     </header>
+    <div class="side-overlay" id="side-overlay"></div>
+
+    <!-- Menu lateral -->
+    <aside class="sidebar" id="sidebar">
+      <h1 class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></h1>
+      <nav id="tabs" class="side-nav" aria-label="Menu do painel">
+        <button data-tab="dashboard" class="active"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Dashboard</span></button>
+        <button data-tab="customers"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Clientes</span><span class="new-dot hidden" id="cust-dot"></span></button>
+        <button data-tab="subscribers"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg><span>Assinantes</span></button>
+        <button data-tab="payments"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/><path d="M6.5 15h4"/></svg><span>Pagamentos</span></button>
+        <button data-tab="plans"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span>Planos</span></button>
+        <p class="side-label">Avisos</p>
+        <button data-tab="notifications"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span>Notificações</span><span class="push-dot" id="push-dot"></span></button>
+        <button data-tab="whatsapp"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.6A8.4 8.4 0 1 1 21 11.5Z"/></svg><span>WhatsApp</span><span class="wa-dot" id="wa-dot"></span></button>
+      </nav>
+      <div class="side-foot">
+        <span class="muted user-email" id="user-email"></span>
+        <a href="/assinar" target="_blank" rel="noopener" class="side-link"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg><span>Página de vendas</span></a>
+        <button id="logout" class="side-link" type="button"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg><span>Sair</span></button>
+      </div>
+    </aside>
 
     <main>
       <!-- DASHBOARD -->
@@ -205,39 +216,77 @@
         <form id="form-pacing" class="card settings wa-pacing" novalidate>
           <div class="settings-head">
             <div>
-              <h3>Intervalo entre os avisos automáticos</h3>
-              <p class="muted">Evita bloqueio do WhatsApp: os avisos programados para clientes (aviso do cartão 5 dias antes, lembretes, atraso, quem não concluiu o pagamento) saem um de cada vez, com uma pausa sorteada entre eles. Confirmações de pagamento e códigos continuam saindo na hora.</p>
+              <h3>Proteção contra bloqueio</h3>
+              <p class="muted">Quando vários clientes precisam de aviso no mesmo dia, o sistema <strong>não manda tudo de uma vez</strong>: envia uma mensagem, espera um pouco e envia a próxima. Assim o WhatsApp não entende o seu número como spam.</p>
             </div>
+            <label class="switch"><input type="checkbox" name="on"><span class="switch-track"></span><span class="switch-text">Ligada</span></label>
+          </div>
+
+          <div id="pacing-fields" class="pacing-fields">
+            <div>
+              <p class="field-title">Velocidade de envio</p>
+              <div class="seg" id="pacing-presets" role="group" aria-label="Velocidade de envio">
+                <button type="button" data-preset="slow">Cuidadosa</button>
+                <button type="button" data-preset="normal">Recomendada</button>
+                <button type="button" data-preset="fast">Rápida</button>
+                <button type="button" data-preset="custom">Personalizada</button>
+              </div>
+              <p class="muted small" id="pacing-preset-hint"></p>
+            </div>
+
+            <div class="pacing-lines">
+              <p class="pacing-line">Esperar de <input name="gap_min_m" type="number" min="0" max="60" step="0.5" inputmode="decimal" aria-label="Espera mínima em minutos"> a <input name="gap_max_m" type="number" min="0" max="60" step="0.5" inputmode="decimal" aria-label="Espera máxima em minutos"> minutos entre uma mensagem e outra.</p>
+              <p class="pacing-line">Enviar no máximo <input name="per_hour" type="number" min="1" max="200" step="1" inputmode="numeric" aria-label="Máximo por hora"> mensagens por hora e <input name="per_day" type="number" min="1" max="1000" step="1" inputmode="numeric" aria-label="Máximo por dia"> por dia.</p>
+              <p class="pacing-line">Enviar só das <input name="hour_start" type="number" min="0" max="23" step="1" inputmode="numeric" aria-label="Hora de início"> h às <input name="hour_end" type="number" min="1" max="24" step="1" inputmode="numeric" aria-label="Hora de término"> h.</p>
+            </div>
+
+            <div class="pacing-example" id="pacing-example"></div>
+          </div>
+
+          <div class="pacing-foot">
+            <p class="muted small" id="pacing-status"></p>
             <button class="btn primary">Salvar</button>
           </div>
-          <label class="check"><input type="checkbox" name="on"> Ativar intervalo entre os envios</label>
-          <div class="row2">
-            <label>Pausa mínima entre mensagens (segundos)<input name="gap_min" type="number" min="5" max="3600" step="1" inputmode="numeric"></label>
-            <label>Pausa máxima entre mensagens (segundos)<input name="gap_max" type="number" min="5" max="3600" step="1" inputmode="numeric"></label>
-          </div>
-          <div class="row2">
-            <label>Máximo de mensagens por hora<input name="per_hour" type="number" min="1" max="200" step="1" inputmode="numeric"></label>
-            <label>Máximo de mensagens por dia<input name="per_day" type="number" min="1" max="1000" step="1" inputmode="numeric"></label>
-          </div>
-          <div class="row2">
-            <label>Enviar a partir de (hora)<input name="hour_start" type="number" min="0" max="23" step="1" inputmode="numeric"></label>
-            <label>Parar de enviar às (hora)<input name="hour_end" type="number" min="1" max="24" step="1" inputmode="numeric"></label>
-          </div>
-          <p class="muted small" id="pacing-status"></p>
-          <p class="muted small">O que passar do limite não se perde: sai na próxima rodada (de hora em hora), dentro do horário.</p>
+          <details class="pacing-help">
+            <summary>Quais mensagens entram nessa fila?</summary>
+            <p><strong>Entram na fila</strong> (saem aos poucos): aviso do cartão 5 dias antes, lembrete de vencimento, aviso de atraso, pergunta "quer continuar?" e lembretes para quem não concluiu o pagamento.</p>
+            <p><strong>Saem na hora</strong>: confirmação de pagamento, códigos de acesso e respostas ao cliente. São mensagens individuais que o cliente está esperando.</p>
+            <p>Nenhum aviso se perde: o que passar do limite da hora ou do dia sai na rodada seguinte, dentro do horário.</p>
+          </details>
         </form>
+
+        <div class="card tpl-card">
+          <div class="settings-head">
+            <div>
+              <h3>Mensagens para os clientes</h3>
+              <p class="muted">Os textos que o sistema manda no WhatsApp. Toque em uma mensagem para ver, editar, desligar ou enviar um teste para o seu número.</p>
+            </div>
+          </div>
+          <div id="wa-templates"><p class="muted">Carregando…</p></div>
+        </div>
+      </section>
+
+      <!-- NOTIFICAÇÕES -->
+      <section id="tab-notifications" class="hidden">
+        <div class="toolbar">
+          <h2>Notificações</h2>
+        </div>
+        <div class="card push-card">
+          <h3>Este aparelho</h3>
+          <div id="push-body"><p class="muted">Verificando…</p></div>
+        </div>
+        <div class="card tpl-card">
+          <div class="settings-head">
+            <div>
+              <h3>Modelos das notificações</h3>
+              <p class="muted">O que aparece na tela do seu celular em cada situação. Toque em um modelo para editar o texto, ligar ou desligar e enviar um teste.</p>
+            </div>
+          </div>
+          <div id="push-templates"><p class="muted">Carregando…</p></div>
+        </div>
       </section>
     </main>
   </div>
-
-  <!-- Notificações no celular (app do painel) -->
-  <dialog id="dlg-push">
-    <div class="push-dlg">
-      <h3>Notificações no celular</h3>
-      <div id="push-body"><p class="muted">Verificando…</p></div>
-      <div class="actions"><button class="btn" type="button" id="push-close">Fechar</button></div>
-    </div>
-  </dialog>
 
   <!-- Modal assinante -->
   <dialog id="dlg-sub">

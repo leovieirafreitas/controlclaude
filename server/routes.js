@@ -4,6 +4,7 @@ import { notifyAdmin, pacingStatus, savePacing, whatsappLogout, whatsappQr, what
 import { setAutopayStatus, setAutopayAmount } from './mp.js';
 import { currentAdmin } from './auth.js';
 import { pushDevices, pushPublicKey, removePushSubscription, savePushSubscription, sendPush } from './push.js';
+import { fill, listTemplates, resetTemplate, sampleVars, saveTemplate, templateInfo } from './templates.js';
 
 export const api = Router();
 
@@ -362,6 +363,32 @@ api.post('/push/test', h(async (req) => {
   if (!r.sent) throw new ApiError(400, 'Nenhum aparelho recebeu. Ative as notificações neste aparelho primeiro.');
   return r;
 }));
+
+// ---------------------------------------------------------------- modelos das mensagens (push e WhatsApp)
+
+api.get('/templates', h(async ({ query }) => ({ templates: await listTemplates(query.channel === 'push' || query.channel === 'whatsapp' ? query.channel : undefined) })));
+api.put('/templates/:key', h(({ params, body }) => saveTemplate(params.key, body || {})));
+api.post('/templates/:key/reset', h(({ params }) => resetTemplate(params.key)));
+// Envia um exemplo (com dados fictícios) do texto que está na tela, mesmo antes de salvar
+api.post('/templates/:key/test', h(evoSafe(async (req) => {
+  const info = templateInfo(req.params.key);
+  if (!info) throw new ApiError(404, 'Modelo não encontrado.');
+  const all = sampleVars();
+  const vars = Object.fromEntries(info.vars.map((k) => [k, all[k]]));
+  const body = fill(str(req.body?.body) || info.body, vars).slice(0, 2500);
+  if (!body) throw new ApiError(400, 'A mensagem está vazia.');
+  if (info.channel === 'push') {
+    const title = fill(str(req.body?.title) || info.title, vars).slice(0, 120);
+    const r = await sendPush({ title, body, url: info.url, tag: `teste-${info.key}` }, { adminEmail: currentAdmin(req) });
+    if (!r.sent) throw new ApiError(400, 'Nenhum aparelho seu recebeu. Ative as notificações neste aparelho primeiro.');
+    return { ok: true, sent: r.sent };
+  }
+  const st = await whatsappStatus();
+  if (st.state !== 'open') throw new ApiError(400, 'O WhatsApp está desconectado. Conecte pelo QR Code primeiro.');
+  if (!st.admin_numbers?.length) throw new ApiError(400, 'Nenhum número de admin configurado para receber o teste.');
+  await notifyAdmin(body);
+  return { ok: true, sent_to: st.admin_numbers };
+})));
 
 // Intervalo entre os avisos programados para clientes (anti-bloqueio do WhatsApp)
 api.get('/whatsapp/pacing', h(() => pacingStatus()));

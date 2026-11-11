@@ -54,6 +54,10 @@ export const api = {
   pushSubscribe: (subscription) => request('/push/subscribe', { method: 'POST', body: { subscription } }),
   pushUnsubscribe: (endpoint) => request('/push/unsubscribe', { method: 'POST', body: { endpoint } }),
   pushTest: () => request('/push/test', { method: 'POST' }),
+  templates: (channel) => request(`/templates?channel=${channel}`),
+  saveTemplate: (key, body) => request(`/templates/${key}`, { method: 'PUT', body }),
+  resetTemplate: (key) => request(`/templates/${key}/reset`, { method: 'POST' }),
+  testTemplate: (key, body) => request(`/templates/${key}/test`, { method: 'POST', body }),
   pacing: () => request('/whatsapp/pacing'),
   savePacing: (body) => request('/whatsapp/pacing', { method: 'PUT', body }),
 
