@@ -2,7 +2,7 @@
 //   POST /api/login/code   { email }       → envia código se o e-mail estiver em ADMIN_EMAILS
 //   POST /api/login/verify { email, code } → cria a sessão do admin
 import { mailConfigured } from './mail.js';
-import { SECRET, OtpError, checkCode, issueCode, makeSession, normEmail, safeEqual } from './otp.js';
+import { SECRET, OtpError, OtpSilentError, checkCode, issueCode, makeSession, normEmail, safeEqual } from './otp.js';
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
   .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
@@ -44,10 +44,13 @@ const sendError = (res, err) => {
 export async function requestCode(req, res) {
   if (authProblems.length) return notConfigured(res);
   const email = normEmail(req.body?.email);
+  const message = 'Se este e-mail tiver acesso ao painel, enviamos um código para ele. Confira também o spam.';
   try {
-    await issueCode({ scope: 'admin', email, ip: req.ip, allowed: isAdminEmail(email) }); // só por e-mail
-    res.json({ ok: true, message: 'Se este e-mail tiver acesso ao painel, enviamos um código para ele. Confira também o spam.' });
+    await issueCode({ scope: 'admin', email, ip: req.ip, allowed: isAdminEmail(email), req, res }); // só por e-mail
+    res.json({ ok: true, message });
   } catch (err) {
+    // Limite que só existe para e-mail com acesso: mesma resposta, para não revelar quem é admin
+    if (err instanceof OtpSilentError) return res.json({ ok: true, message });
     sendError(res, err);
   }
 }
@@ -56,7 +59,7 @@ export async function verifyCode(req, res) {
   if (authProblems.length) return notConfigured(res);
   const email = normEmail(req.body?.email);
   try {
-    await checkCode({ scope: 'admin', email, code: req.body?.code, allowed: isAdminEmail(email) });
+    await checkCode({ scope: 'admin', email, code: req.body?.code, allowed: isAdminEmail(email), req, res });
     session.set(req, res, email);
     res.json({ ok: true, email });
   } catch (err) {

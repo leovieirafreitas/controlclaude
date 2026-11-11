@@ -8,10 +8,10 @@
 import { Router } from 'express';
 import { all, get, run } from './db.js';
 import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, planSoldOut } from './routes.js';
-import { EMAIL_RE, checkCode, issueCode, makeSession, normEmail } from './otp.js';
+import { EMAIL_RE, OtpSilentError, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
 import { notifyCancel, notifyKeep, notifySignup, notifyCardRejected } from './whatsapp.js';
-import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay, createAutopayLink, checkPendingAutopay } from './mp.js';
+import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay, createAutopayLink, checkPendingAutopay, cancelPreapproval } from './mp.js';
 
 // Assinaturas nesses status já ocupam uma licença do plano: podem pagar mesmo com o plano esgotado.
 const HOLDS_LICENSE = ['ativo', 'pausado'];
@@ -36,8 +36,11 @@ export function checkBirthDate(v) {
   return s;
 }
 
+/** Texto de uma linha só: sem quebras, caracteres de controle nem marcações do WhatsApp (* _ ~ `). */
+const oneLine = (v) => str(v).replace(/[\u0000-\u001F\u007F\u2028\u2029]+/g, ' ').replace(/[*_~`]/g, '').replace(/\s+/g, ' ').trim();
+
 function checkName(v) {
-  const s = str(v);
+  const s = oneLine(v);
   if (s.length < 2 || s.length > 120) throw new ApiError(400, 'Informe seu nome completo.');
   return s;
 }
@@ -45,7 +48,7 @@ function checkName(v) {
 function checkPhone(v) {
   const s = str(v);
   if (!s) throw new ApiError(400, 'Informe seu WhatsApp com DDD. É por ele que avisamos o vencimento.');
-  if (s.replace(/\D/g, '').length < 10 || s.length > 30) throw new ApiError(400, 'WhatsApp inválido. Use DDD + número.');
+  if (s.replace(/\D/g, '').length < 10 || s.length > 30 || !/^[\d +().-]+$/.test(s)) throw new ApiError(400, 'WhatsApp inválido. Use DDD + número.');
   return s;
 }
 
@@ -90,6 +93,7 @@ function tooManyFailures(key, max) {
   return list.length >= max;
 }
 const addFailure = (key) => failures.set(key, [...(failures.get(key) || []), Date.now()]);
+const removeLastFailure = (key) => { const l = failures.get(key); if (l?.length) l.pop(); };
 
 // Limite de criação de contas: 5 por IP a cada 10 min
 const signups = new Map();
@@ -141,13 +145,15 @@ memberApi.post('/register', h(async (req, res) => {
     RETURNING id`,
   [name, email, phone, birth, await hashPassword(password), TERMS_VERSION]);
   if (!r.rowCount) throw new ApiError(409, 'Este e-mail já tem conta. Entre com sua senha ou use "Esqueci minha senha".');
-  return sendAccessCode(req, email, 'Para confirmar seu e-mail, enviamos um código de 6 dígitos para');
+  // Se os dados de um cadastro pendente foram substituídos, os códigos enviados antes não confirmam mais nada
+  await run("UPDATE login_codes SET used = true WHERE scope = 'login' AND email = ? AND used = false", [email]);
+  return sendAccessCode(req, res, email, 'Para confirmar seu e-mail, enviamos um código de 6 dígitos para');
 }));
 
 /** Envia o código de acesso (scope login) e devolve a resposta para a tela pedir o código. */
-async function sendAccessCode(req, email, intro = 'Enviamos um código de 6 dígitos para') {
+async function sendAccessCode(req, res, email, intro = 'Enviamos um código de 6 dígitos para') {
   try {
-    await issueCode({ scope: 'login', email, ip: req.ip, allowed: true });
+    await issueCode({ scope: 'login', email, ip: req.ip, allowed: true, req, res });
   } catch (err) {
     // Pediu de novo antes de 1 minuto: o código enviado há pouco continua valendo
     if (err.status === 429 && /^Aguarde/.test(err.message)) {
@@ -172,24 +178,24 @@ memberApi.post('/login', h(async (req, res) => {
   if (tooManyFailures(ipKey, 20) || tooManyFailures(emailKey, 5)) {
     throw new ApiError(429, 'Muitas tentativas erradas. Aguarde 15 minutos ou use "Esqueci minha senha".');
   }
+  // Conta a tentativa ANTES de conferir: requisições simultâneas já enxergam umas às outras
+  addFailure(ipKey);
+  addFailure(emailKey);
   const c = await customerByEmail(email);
   const ok = await verifyPassword(req.body?.password, c?.password_hash);
-  if (!c || !ok) {
-    addFailure(ipKey);
-    addFailure(emailKey);
-    throw new ApiError(401, 'E-mail ou senha incorretos.');
-  }
+  if (!c || !ok) throw new ApiError(401, 'E-mail ou senha incorretos.');
   failures.delete(emailKey);
+  removeLastFailure(ipKey); // senha certa não conta como erro do IP
   // Verificação em duas etapas: senha certa → código de 6 dígitos no e-mail. Só entra com o código.
   // (Se o e-mail ainda não foi confirmado no cadastro, este mesmo código confirma.)
-  return sendAccessCode(req, email, c.email_verified_at ? undefined : 'Para confirmar seu e-mail, enviamos um código de 6 dígitos para');
+  return sendAccessCode(req, res, email, c.email_verified_at ? undefined : 'Para confirmar seu e-mail, enviamos um código de 6 dígitos para');
 }));
 
 // 2ª etapa do login: o código só existe se a senha foi conferida na 1ª etapa
 memberApi.post('/login/verify', h(async (req, res) => {
   const email = normEmail(req.body?.email);
   const c = await customerByEmail(email);
-  await checkCode({ scope: 'login', email, code: req.body?.code, allowed: Boolean(c) });
+  await checkCode({ scope: 'login', email, code: req.body?.code, allowed: Boolean(c), req, res });
   await confirmEmail(c);
   memberSession.set(req, res, email);
   return { ok: true };
@@ -201,18 +207,24 @@ memberApi.post('/logout', (req, res) => {
 });
 
 // Esqueci a senha: 1) pede código  2) código + nova senha
-memberApi.post('/password/forgot', h(async (req) => {
+memberApi.post('/password/forgot', h(async (req, res) => {
   const email = normEmail(req.body?.email);
   const c = await customerByEmail(email);
-  await issueCode({ scope: 'reset', email, ip: req.ip, allowed: Boolean(c) }); // só por e-mail
-  return { ok: true, message: 'Se este e-mail tiver conta, enviamos um código de 6 dígitos para o seu e-mail. Confira também a caixa de spam.' };
+  const message = 'Se este e-mail tiver conta, enviamos um código de 6 dígitos para o seu e-mail. Confira também a caixa de spam.';
+  try {
+    await issueCode({ scope: 'reset', email, ip: req.ip, allowed: Boolean(c), req, res }); // só por e-mail
+  } catch (err) {
+    if (err instanceof OtpSilentError) return { ok: true, message }; // não revela se o e-mail tem conta
+    throw err;
+  }
+  return { ok: true, message };
 }));
 
 memberApi.post('/password/reset', h(async (req, res) => {
   const email = normEmail(req.body?.email);
   const password = checkNewPassword(req.body?.password);
   const c = await customerByEmail(email);
-  await checkCode({ scope: 'reset', email, code: req.body?.code, allowed: Boolean(c) });
+  await checkCode({ scope: 'reset', email, code: req.body?.code, allowed: Boolean(c), req, res });
   await run('UPDATE customers SET password_hash = ? WHERE id = ?', [await hashPassword(password), c.id]);
   await confirmEmail(c); // o código chegou ao e-mail: ele existe e é da pessoa
   failures.delete(`email:${email}`);
@@ -331,7 +343,11 @@ memberApi.post('/subscribe', h(async (req) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando', 'Cadastro pela área do assinante')`,
     [c.id, c.name, c.email, c.phone, c.birth_date, plan.id, today, Math.min(Number(today.slice(8, 10)), 28)]);
   } else if (sub.plan_id !== plan.id) {
-    await run("UPDATE subscribers SET plan_id = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END WHERE id = ?", [plan.id, sub.id]);
+    await run("UPDATE subscribers SET plan_id = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END, mp_preapproval_pending = NULL WHERE id = ?", [plan.id, sub.id]);
+    // Link de assinatura gerado para o plano anterior deixa de valer (o valor era outro)
+    if (sub.mp_preapproval_pending) {
+      cancelPreapproval(sub.mp_preapproval_pending).catch((e) => console.error('Mercado Pago (cancelar link antigo):', e.message));
+    }
     await setAutopayAmount(sub, plan.price_cents).catch((e) => console.error('Mercado Pago (valor da renovação):', e.message));
   }
 
@@ -353,6 +369,10 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (req.body?.method === 'pix' && !PIX_ENABLED) throw new ApiError(400, 'O pagamento é só por cartão de crédito, com renovação automática.');
   const c = await currentCustomer(req);
   const sub = await requireSubscription(c);
+  // Limite de tentativas de pagamento por cliente (cada uma cria um pedido no Mercado Pago)
+  const tries = await get(`SELECT COUNT(*) FILTER (WHERE created_at > now() - interval '1 hour') AS h, COUNT(*) AS d
+    FROM checkouts WHERE subscriber_id = ? AND created_at > now() - interval '1 day'`, [sub.id]);
+  if (Number(tries.h) >= 8 || Number(tries.d) >= 25) throw new ApiError(429, 'Muitas tentativas de pagamento. Aguarde um pouco ou fale com a gente no WhatsApp.');
   const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
   if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);

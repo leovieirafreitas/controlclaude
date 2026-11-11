@@ -1,6 +1,7 @@
 // Rotas públicas (sem login) usadas pela página de vendas /assinar.
 // O cadastro e a compra acontecem na área do assinante (/api/member), com conta e senha.
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import { hmac } from './otp.js';
 import { handleIncomingMessage } from './whatsapp.js';
 import { all } from './db.js';
@@ -21,10 +22,39 @@ publicApi.get('/info', h(async () => {
 // Notificações do Mercado Pago (só chegam quando o site está publicado com HTTPS).
 // Configure o webhook no painel do Mercado Pago com o tópico "Order" apontando para /api/public/mp-webhook.
 // O corpo não é confiável: buscamos o pedido direto na API antes de registrar.
+// Assinatura secreta do webhook (painel do Mercado Pago → Webhooks → "Assinatura secreta"), no .env como
+// MP_WEBHOOK_SECRET. Com ela, avisos falsos são recusados sem nem consultar o Mercado Pago.
+const MP_WEBHOOK_SECRET = process.env.MP_WEBHOOK_SECRET || '';
+if (!MP_WEBHOOK_SECRET) console.warn('Aviso: MP_WEBHOOK_SECRET não definida; o webhook do Mercado Pago aceita avisos sem assinatura (cada aviso ainda é conferido na API do MP).');
+
+function validMpSignature(req, id) {
+  const parts = Object.fromEntries(String(req.get('x-signature') || '').split(',').map((p) => p.trim().split('=')));
+  const ts = parts.ts, v1 = parts.v1;
+  if (!ts || !v1 || !/^[0-9a-f]{64}$/i.test(v1)) return false;
+  const tsMs = Number(ts) < 1e12 ? Number(ts) * 1000 : Number(ts);
+  if (!Number.isFinite(tsMs) || Math.abs(Date.now() - tsMs) > 15 * 60_000) return false; // aviso velho = reenvio suspeito
+  const rid = req.get('x-request-id');
+  const manifest = `id:${/^[a-z0-9]+$/i.test(id) ? id.toLowerCase() : id};${rid ? `request-id:${rid};` : ''}ts:${ts};`;
+  const expected = crypto.createHmac('sha256', MP_WEBHOOK_SECRET).update(manifest).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(v1.toLowerCase()));
+}
+
+// O mesmo aviso repetido em poucos segundos só é processado uma vez (evita enxurrada de consultas ao MP)
+const recentHooks = new Map();
+function seenRecently(key) {
+  const now = Date.now();
+  if (recentHooks.size > 2000) for (const [k, t] of recentHooks) if (now - t > 60_000) recentHooks.delete(k);
+  const last = recentHooks.get(key);
+  recentHooks.set(key, now);
+  return last && now - last < 30_000;
+}
+
 publicApi.post('/mp-webhook', async (req, res) => {
   const type = req.body?.type || req.query.type || req.query.topic;
-  const id = String(req.body?.data?.id || req.query['data.id'] || req.query.id || '');
+  const id = String(req.query['data.id'] || req.body?.data?.id || req.query.id || '');
+  if (MP_WEBHOOK_SECRET && !validMpSignature(req, id)) return res.sendStatus(401);
   res.sendStatus(200);
+  if (seenRecently(`${type}:${id}`)) return;
   if (type === 'order' && /^ORD[A-Z0-9]+$/.test(id)) {
     syncOrderId(id).catch((e) => console.error('Webhook MP:', e.message));
   }

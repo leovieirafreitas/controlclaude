@@ -174,3 +174,8 @@ create table if not exists public.app_secrets (
   value text not null
 );
 alter table public.app_secrets enable row level security;
+
+-- v13: código amarrado ao navegador que pediu (impede força bruta e bloqueio do login por terceiros)
+alter table public.login_codes add column if not exists req_hash text;   -- HMAC do valor aleatório guardado em cookie no navegador
+alter table public.login_codes add column if not exists ip_hash  text;   -- HMAC do IP de quem pediu (limite por e-mail + IP)
+create index if not exists idx_login_codes_req on public.login_codes(scope, email, req_hash);

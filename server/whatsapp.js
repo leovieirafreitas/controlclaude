@@ -215,6 +215,24 @@ export async function notifyCardRejected(subscriberId, { once = false, message =
   ].filter((l) => l !== null).join('\n')));
 }
 
+/** Pagamento aprovado, mas menor que o preço do plano atual: o plano NÃO foi ativado. */
+export async function notifyUnderpaid({ subscriberId, month, paidCents, lastCents }) {
+  const s = await subscriberInfo(subscriberId).catch(() => null);
+  if (!s) return;
+  firePush({ title: 'Pagamento menor que o plano', body: `${s.plan_name}: pago ${brl(paidCents)} de ${brl(s.price_cents)}. Plano não ativado.`, tag: `menor-${s.id}-${month}`, url: '/admin#payments' });
+  if (!whatsappConfigured) return;
+  fire(notifyAdmin([
+    '⚠️ *Pagamento menor que o preço do plano*',
+    '',
+    ...contactLines(s),
+    `📦 *Plano atual:* ${s.plan_name} (${brl(s.price_cents)}/mês)`,
+    `💵 *Pago em ${fmtMonth(month)}:* ${brl(paidCents)} (último pagamento: ${brl(lastCents)})`,
+    '',
+    '_O pagamento foi registrado, mas o plano *não foi ativado*. Pode ser troca de plano depois de gerar o pagamento. Confira e ative pelo painel se estiver tudo certo._',
+    `🕒 ${nowBR()}`,
+  ].join('\n')));
+}
+
 /** Cliente criou a conta (ainda sem pagar). */
 export function notifySignup({ name, email, phone, birth_date }) {
   pushEvent('push_cadastro', { cliente: name || '', email: email || '', telefone: phone || '' }, `cadastro-${email}`);
