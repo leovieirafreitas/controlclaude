@@ -8,6 +8,7 @@ import { initPlans, loadPlans } from './views/plans.js';
 import { initWhatsapp, loadWhatsapp, refreshWhatsappDot, resetPacingDraft } from './views/whatsapp.js';
 import { enhanceControls } from './controls.js';
 import { initPush, loadPushDevice, refreshPush } from './push.js';
+import { initAdminPix } from './views/pix.js';
 import { initTemplates, loadTemplates } from './views/templates.js';
 
 enhanceControls(); // listas e calendários com o visual do site
@@ -181,6 +182,7 @@ $('#logout').addEventListener('click', async () => {
 initDashboard();
 initCustomers();
 initSubscribers(refresh);
+initAdminPix();
 initPayments(refresh);
 initPlans();
 initWhatsapp();

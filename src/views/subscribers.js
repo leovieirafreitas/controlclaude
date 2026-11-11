@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { $, brl, esc, fmtDate, badge, autopayBadge, today, toast, bindDialogForm } from '../utils.js';
+import { openAdminPix } from './pix.js';
 
 let subscribers = [];
 let plans = [];
@@ -23,6 +24,7 @@ function render() {
       <td>${badge(s.status)}${autopayBadge(s)}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
       <td>
         ${s.status === 'aguardando' ? `<button class="btn small primary" data-activate="${s.id}">Ativar</button>` : ''}
+        ${s.price_cents > 0 ? `<button class="btn small" data-pix="${s.id}" title="Gerar um Pix da mensalidade para mandar ao cliente">Gerar Pix</button>` : ''}
         <button class="btn small" data-edit="${s.id}">Editar</button>
         <button class="btn small danger" data-del="${s.id}">Excluir</button>
       </td>
@@ -56,7 +58,8 @@ export function initSubscribers(onChange) {
   $('#new-sub').addEventListener('click', () => openSubscriber());
 
   $('#sub-rows').addEventListener('click', async (e) => {
-    const { edit, del, activate } = e.target.dataset;
+    const { edit, del, activate, pix } = e.target.dataset;
+    if (pix) return openAdminPix(subscribers.find((x) => x.id === Number(pix)), onChange);
     if (activate) {
       const s = subscribers.find((x) => x.id === Number(activate));
       await api.saveSubscriber(s.id, { ...s, status: 'ativo' });

@@ -19,9 +19,13 @@ const SOLD_OUT_MSG = 'Este plano está esgotado no momento. Escolha outro plano 
 
 export const memberApi = Router();
 // Versão dos Termos de uso / Política de privacidade (mude junto com a data nas páginas termos.html e privacidade.html)
-const TERMS_VERSION = '2026-11-09';
-// Pix como alternativa ao cartão com renovação automática (pago mês a mês). Desligar: PIX_ENABLED=off no .env
-export const PIX_ENABLED = !/^(off|0|false|nao|não)$/i.test(process.env.PIX_ENABLED || 'on');
+const TERMS_VERSION = '2026-11-11';
+// O cliente paga só com cartão de crédito, em assinatura (renovação automática).
+// Pix pelo próprio cliente fica desligado; quem não conseguir pagar recebe um Pix gerado pelo admin no painel.
+// Para voltar a oferecer Pix na área do assinante: PIX_ENABLED=on no .env
+export const PIX_ENABLED = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'off');
+// Pagamento avulso (só este mês) no cartão pelo próprio cliente: desligado. Assinatura é o único caminho.
+const CARD_ONCE_ENABLED = false;
 // Depois de uma renovação automática recusada, espera 7 dias antes de tentar de novo (tentativas seguidas pioram o antifraude)
 const AUTOPAY_RETRY_MS = 7 * 24 * 3600_000;
 export const memberSession = makeSession({ cookie: 'msid', maxAgeMs: 30 * 24 * 3600_000, sameSite: 'lax' });
@@ -283,7 +287,7 @@ async function memberViewByEmail(email) {
       next_charge: { month: next, current_paid: next !== month },
       // renovação automática no cartão (assinatura do Mercado Pago)
       // renovação automática recusada há menos de 7 dias: a tela vai direto para o pagamento avulso do mês
-      autopay_blocked: Boolean(sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS
+      autopay_blocked: CARD_ONCE_ENABLED && Boolean(sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS
         && !(sub.mp_preapproval_id && sub.autopay_status === 'authorized')),
       autopay: sub.mp_preapproval_id && sub.autopay_status !== 'cancelled'
         ? { status: sub.autopay_status, card_last4: sub.card_last4, card_brand: sub.card_brand, next_charge_date: sub.next_charge_date }
@@ -388,9 +392,12 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   }
   const deviceId = str(req.body?.device_id).slice(0, 200) || undefined;
 
-  // Plano B: o Mercado Pago recusou a renovação automática → paga este mês de forma avulsa no cartão.
-  // No próximo vencimento o cliente é convidado de novo a ligar a renovação automática.
-  const blocked = sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
+  // Plano B antigo (desligado): pagar só este mês de forma avulsa no cartão.
+  // Agora, se a assinatura não passar, o admin gera um Pix no painel e manda para o cliente.
+  if (req.body?.mode === 'once' && !CARD_ONCE_ENABLED) {
+    throw new ApiError(400, 'O pagamento é por assinatura no cartão de crédito. Se não conseguir, fale com a gente no WhatsApp que ajudamos você.');
+  }
+  const blocked = CARD_ONCE_ENABLED && sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
   if (req.body?.mode === 'once' || blocked) {
     if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
     const month = await billingMonth(sub, plan.price_cents);

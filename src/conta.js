@@ -69,7 +69,7 @@ async function showSupport() {
   const href = `https://wa.me/${n}?text=${encodeURIComponent('Olá! Preciso de ajuda com minha assinatura da Control Claude.')}`;
   document.querySelectorAll('.support-link').forEach((a) => { a.href = href; });
   $('#support-number').textContent = shown;
-  for (const id of ['#support-card', '#auth-support', '#wa-float']) $(id).classList.remove('hidden');
+  for (const id of ['#support-card', '#auth-support', '#wa-float', '#pay-help']) $(id)?.classList.remove('hidden');
 }
 showSupport();
 
@@ -512,7 +512,7 @@ $('#autopay-btn').addEventListener('click', async (e) => {
   }
 });
 
-$('#once-link').addEventListener('click', () => {
+$('#once-link')?.addEventListener('click', () => {
   payMode = 'once';
   const price = brl(state.subscription.plan.price_cents);
   $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} Cartão de crédito · pagamento deste mês`;
