@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { all, get, run } from './db.js';
 import { notifyAdmin, pacingStatus, savePacing, whatsappLogout, whatsappQr, whatsappStatus } from './whatsapp.js';
-import { setAutopayStatus, setAutopayAmount } from './mp.js';
+import { mpConfigured, payWithPix, setAutopayStatus, setAutopayAmount, syncOrderId } from './mp.js';
 import { currentAdmin } from './auth.js';
 import { pushDevices, pushPublicKey, removePushSubscription, savePushSubscription, sendPush } from './push.js';
 import { fill, listTemplates, resetTemplate, sampleVars, saveTemplate, templateInfo } from './templates.js';
@@ -169,6 +169,43 @@ api.get('/customers', h(() => all(`
   LEFT JOIN LATERAL (SELECT * FROM subscribers WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) s ON true
   LEFT JOIN plans p ON p.id = s.plan_id
   ORDER BY c.created_at DESC`)));
+
+// ---------------------------------------------------------------- Pix gerado pelo admin (cliente que não conseguiu pagar no cartão)
+
+const MP_ORDER_RE = /^ORD[A-Z0-9]+$/;
+
+// Gera um Pix da mensalidade em aberto do assinante, para o admin copiar e mandar. O pagamento é
+// reconhecido sozinho (webhook do Mercado Pago, conferência a cada 5 min ou pela tela do Pix aberta).
+api.post('/subscribers/:id/pix', h(async ({ params }) => {
+  if (!mpConfigured) throw new ApiError(503, 'Mercado Pago não configurado no servidor.');
+  const sub = await get('SELECT * FROM subscribers WHERE id = ?', [Number(params.id)]);
+  if (!sub) throw new ApiError(404, 'Assinante não encontrado.');
+  const plan = await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]);
+  if (!plan || plan.price_cents <= 0) throw new ApiError(400, 'O plano deste assinante não tem valor para cobrar.');
+  if (!sub.email) throw new ApiError(400, 'Cadastre o e-mail deste assinante (Editar) para gerar o Pix: o Mercado Pago exige.');
+  const { billingMonth } = await import('./member.js');
+  const month = await billingMonth(sub, plan.price_cents);
+  let pix;
+  try {
+    pix = await payWithPix(sub, plan, month);
+  } catch (err) {
+    console.error('Pix pelo painel:', err.message);
+    throw new ApiError(502, 'Não foi possível gerar o Pix no Mercado Pago. Tente de novo.');
+  }
+  if (!pix.qr_code) throw new ApiError(502, 'O Mercado Pago não devolveu o código Pix. Tente de novo.');
+  return { ...pix, month, amount_cents: plan.price_cents, plan_name: plan.name, name: sub.name, phone: sub.phone };
+}));
+
+// A tela do Pix aberta no painel pergunta de tempos em tempos se já foi pago
+api.get('/subscribers/:id/pix/:order', h(async ({ params }) => {
+  const id = Number(params.id);
+  const orderId = String(params.order || '');
+  if (!MP_ORDER_RE.test(orderId)) throw new ApiError(400, 'Pedido inválido.');
+  const order = await syncOrderId(orderId, id).catch((e) => { console.error('Conferir Pix:', e.message); return null; });
+  const paid = Boolean(await get('SELECT 1 AS x FROM payments WHERE subscriber_id = ? AND notes = ?', [id, `Mercado Pago ${orderId}`]));
+  const sub = await get('SELECT status FROM subscribers WHERE id = ?', [id]);
+  return { paid, status: sub?.status || null, order_status: order?.status || null };
+}));
 
 api.post('/subscribers', h(async ({ body }) => {
   const r = await run(`

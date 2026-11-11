@@ -191,8 +191,10 @@ export async function payWithPix(sub, plan, month) {
     },
   });
   await saveCheckout(sub, month, order, plan.price_cents);
-  const pm = firstPayment(order).payment_method || {};
-  return { order_id: order.id, qr_code: pm.qr_code, qr_code_base64: pm.qr_code_base64, ticket_url: pm.ticket_url };
+  const pay = firstPayment(order);
+  const pm = pay.payment_method || {};
+  return { order_id: order.id, qr_code: pm.qr_code, qr_code_base64: pm.qr_code_base64, ticket_url: pm.ticket_url,
+    expires_at: pay.date_of_expiration || order.expiration_time || null };
 }
 
 /** Confere um pedido pelo id (webhook ou "já paguei"). */

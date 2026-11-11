@@ -68,6 +68,8 @@ export const api = {
   subscribers: () => request('/subscribers'),
   saveSubscriber: (id, body) => request(id ? `/subscribers/${id}` : '/subscribers', { method: id ? 'PUT' : 'POST', body }),
   deleteSubscriber: (id) => request(`/subscribers/${id}`, { method: 'DELETE' }),
+  subscriberPix: (id) => request(`/subscribers/${id}/pix`, { method: 'POST' }),
+  subscriberPixStatus: (id, order) => request(`/subscribers/${id}/pix/${encodeURIComponent(order)}`),
 
   payments: (month, method) => {
     const q = new URLSearchParams();

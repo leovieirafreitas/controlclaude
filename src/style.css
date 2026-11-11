@@ -446,3 +446,20 @@ label.check input { width: auto; }
 .settings label.switch { display: inline-flex; color: var(--text); font-size: 14px; }
 .wa-card { max-width: 860px; }
 #push-body p { margin: 0; }
+
+/* ---------- Pix gerado pelo admin */
+#dlg-pix { width: min(620px, calc(100vw - 32px)); }
+.pix-dlg { padding: 20px; display: grid; gap: 14px; }
+.pix-dlg h3 { margin: 0; }
+#pix-admin-body { display: grid; gap: 14px; }
+#pix-admin-body p { margin: 0; }
+.pix-admin-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.pix-admin-amount { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pix-admin-main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
+.pix-admin-qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 10px; border: 1px solid var(--border); }
+.pix-admin-code { display: grid; gap: 8px; min-width: 0; }
+.pix-admin-code textarea { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: none; word-break: break-all; }
+.pix-admin-code .btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.pix-admin-status { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); font-size: 14px; }
+.pix-admin-status.paid { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+@media (max-width: 560px) { .pix-admin-main { grid-template-columns: 1fr; justify-items: center; } .pix-admin-code { width: 100%; } }

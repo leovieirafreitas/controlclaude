@@ -16,7 +16,7 @@ const CUSTOMER_ON = !/^(off|0|false|nao|não)$/i.test(process.env.WHATSAPP_CUSTO
 const REMINDER_DAYS = Math.max(0, Number(process.env.REMINDER_DAYS_BEFORE ?? 3) || 0);
 // Aviso de que o pagamento passa a ser automático no cartão (clientes sem renovação automática), em dias antes do vencimento
 // Pix como alternativa ao cartão (mesma chave do member.js): muda os textos dos lembretes
-const PIX_ON = !/^(off|0|false|nao|não)$/i.test(process.env.PIX_ENABLED || 'on');
+const PIX_ON = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'off'); // mesma chave do member.js (padrão: desligado)
 const PAY_HOW = PIX_ON ? 'cartão de crédito ou Pix' : 'cartão de crédito';
 const CARD_NOTICE_DAYS = Math.max(REMINDER_DAYS + 1, Number(process.env.CARD_NOTICE_DAYS_BEFORE ?? 5) || 5);
 // Quantos dias antes do fim do acesso perguntar se o cliente quer continuar
@@ -210,7 +210,7 @@ export async function notifyCardRejected(subscriberId, { once = false, message =
     '',
     once
       ? '_O cliente tentou pagar este mês de forma avulsa e também foi recusado. Vale um contato pessoal._'
-      : '_A tela ofereceu ao cliente pagar este mês de forma avulsa no cartão._',
+      : '_Se ele não conseguir com outro cartão, gere um Pix no painel (Assinantes → Gerar Pix) e mande para ele._',
     `🕒 ${nowBR()}`,
   ].filter((l) => l !== null).join('\n')));
 }
