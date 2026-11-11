@@ -114,7 +114,7 @@ export async function notifyPayment({ subscriberId, month, amountCents, method, 
   // Notificação no app do painel (celular do admin)
   firePush({
     title: first ? 'Nova assinatura' : 'Pagamento recebido',
-    body: `${s.name} · ${s.plan_name}\n${brl(amountCents)} via ${how}`,
+    body: `${s.plan_name} · ${brl(amountCents)}`, // só plano e valor (sem nome do cliente na tela de bloqueio)
     tag: `pagamento-${s.id}-${month}`,
     url: '/admin#payments',
   });
