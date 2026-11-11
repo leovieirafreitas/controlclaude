@@ -26,3 +26,11 @@ export const METHOD_ICON = {
 };
 
 export const methodIcon = (m) => METHOD_ICON[m] || CARD;
+
+// Ícones de interface do painel (mesmo traço dos ícones acima)
+const ui = (body, size = 16) =>
+  `<svg class="ui-icon" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+// Sino (notificações)
+export const ICON_BELL = ui('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>');
+// Compartilhar do iPhone (quadrado com seta para cima)
+export const ICON_SHARE = ui('<path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M8 11H6.5A1.5 1.5 0 0 0 5 12.5v7A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H16"/>');

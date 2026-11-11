@@ -358,7 +358,7 @@ api.post('/push/unsubscribe', h(async (req) => {
   return { ok: true };
 }));
 api.post('/push/test', h(async (req) => {
-  const r = await sendPush({ title: '✅ Notificações ativadas', body: 'Você vai ser avisado aqui de novos clientes e pagamentos.', tag: 'teste' }, { adminEmail: currentAdmin(req) });
+  const r = await sendPush({ title: 'Notificações ativadas', body: 'Você vai ser avisado aqui de novos clientes e pagamentos.', tag: 'teste' }, { adminEmail: currentAdmin(req) });
   if (!r.sent) throw new ApiError(400, 'Nenhum aparelho recebeu. Ative as notificações neste aparelho primeiro.');
   return r;
 }));
