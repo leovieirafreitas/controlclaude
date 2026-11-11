@@ -4,7 +4,7 @@
 // Os dados do cartão são tokenizados no navegador pelo SDK do Mercado Pago (Card Payment Brick);
 // o servidor só recebe o token.
 import { all, get, run } from './db.js';
-import { notifyPayment } from './whatsapp.js';
+import { notifyPayment, notifyUnderpaid } from './whatsapp.js';
 
 const TOKEN = process.env.MP_ACCESS_TOKEN || '';
 export const MP_PUBLIC_KEY = process.env.MP_PUBLIC_KEY || '';
@@ -66,6 +66,27 @@ function firstPayment(order) {
 }
 
 /**
+ * Ativa o plano só se o que foi pago no mês cobre o preço do plano ATUAL do assinante.
+ * Impede trocar para um plano mais caro depois de gerar o Pix (ou o link) do plano mais barato.
+ * Se faltar, o pagamento fica registrado (o dinheiro entrou), o plano não é ativado e o admin é avisado.
+ */
+async function activateIfPaid(subId, month, paidNowCents) {
+  const s = await get(`
+    SELECT s.id, s.status, p.price_cents,
+           (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid
+    FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [month, subId]);
+  if (!s) return false;
+  if (Number(s.paid) >= Number(s.price_cents)) {
+    if (s.status !== 'ativo') await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [s.id]);
+    return true;
+  }
+  console.warn(`Pagamento menor que o plano (assinante ${s.id}, ${month}): pago ${s.paid}, plano ${s.price_cents}`);
+  notifyUnderpaid({ subscriberId: s.id, month, paidCents: Number(s.paid), lastCents: paidNowCents })
+    .catch((e) => console.error('Aviso de pagamento menor:', e.message));
+  return false;
+}
+
+/**
  * Registra o pagamento de um pedido aprovado (idempotente).
  * Retorna true se registrou agora.
  */
@@ -88,9 +109,7 @@ async function recordOrder(order) {
     new Date().toLocaleDateString('sv-SE'),
     METHOD[pay.payment_method?.type] || 'credito', `Mercado Pago ${order.id}`, String(pay.id || order.id)]);
 
-  if (r.rowCount && sub.status !== 'ativo') {
-    await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [sub.id]);
-  }
+  if (r.rowCount) await activateIfPaid(sub.id, month, Math.round(Number(pay.amount || order.total_amount) * 100));
   if (r.rowCount) {
     // Aviso no WhatsApp do admin (não espera nem quebra o pagamento se falhar)
     notifyPayment({
@@ -256,7 +275,7 @@ async function recordAutopayCharge(subId, invoice) {
   [sub.id, month, amountCents, new Date().toLocaleDateString('sv-SE'), `Mercado Pago renovação automática ${ref}`, String(pay.id)]);
   if (!r.rowCount) return false;
 
-  if (sub.status !== 'ativo') await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [sub.id]); // foi cobrado: plano ativo
+  await activateIfPaid(sub.id, month, amountCents); // foi cobrado: ativa se cobriu o preço do plano
   // o vencimento passa a ser o dia em que o cartão é cobrado
   const day = Math.min(Number(new Date().toLocaleDateString('sv-SE').slice(8, 10)), 28);
   if (sub.due_day !== day) await run('UPDATE subscribers SET due_day = ? WHERE id = ?', [day, sub.id]);
@@ -358,6 +377,12 @@ export async function changeAutopayCard(sub, card) {
 // Quando a assinatura fica "authorized", ela passa a ser a renovação automática do assinante.
 
 const enc = encodeURIComponent;
+
+/** Cancela um link/assinatura no Mercado Pago (ex.: link gerado para o plano anterior). */
+export async function cancelPreapproval(id) {
+  if (!id || !mpConfigured) return;
+  await mp(`/preapproval/${enc(id)}`, { method: 'PUT', body: { status: 'cancelled' } });
+}
 const ymd = (v) => (v ? String(v).slice(0, 10) : null);
 
 /** Cria (ou reaproveita) o link de assinatura do Mercado Pago para o assinante. Retorna a URL. */
@@ -396,6 +421,17 @@ async function adoptPreapproval(pre) {
   if (!sub) return null;
   if (sub.mp_preapproval_id === pre.id) return sub;
   if (pre.status !== 'authorized') return null;
+
+  // O valor do link precisa cobrir o preço do plano atual (o cliente pode ter trocado de plano depois de gerar o link)
+  const plan = await get('SELECT price_cents FROM plans WHERE id = ?', [sub.plan_id]);
+  const linkCents = Math.round(Number(pre.auto_recurring?.transaction_amount || 0) * 100);
+  if (!plan || linkCents < Number(plan.price_cents)) {
+    console.warn(`Link de assinatura com valor menor que o plano (assinante ${sub.id}): link ${linkCents}, plano ${plan?.price_cents}`);
+    await mp(`/preapproval/${enc(pre.id)}`, { method: 'PUT', body: { status: 'cancelled' } })
+      .catch((e) => console.error('Mercado Pago (cancelar link com valor errado):', e.message));
+    await run('UPDATE subscribers SET mp_preapproval_pending = NULL WHERE id = ? AND mp_preapproval_pending = ?', [sub.id, pre.id]);
+    return null;
+  }
 
   if (sub.mp_preapproval_id && sub.autopay_status !== 'cancelled') {
     await mp(`/preapproval/${enc(sub.mp_preapproval_id)}`, { method: 'PUT', body: { status: 'cancelled' } })
