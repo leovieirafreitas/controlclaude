@@ -1,0 +1,18 @@
+{
+  "name": "Control Claude — Painel",
+  "short_name": "Control Claude",
+  "description": "Painel do administrador: clientes, assinaturas e pagamentos.",
+  "id": "/admin",
+  "start_url": "/admin",
+  "scope": "/admin",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f6f4",
+  "theme_color": "#c96442",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/icons/admin-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/admin-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/admin-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -2,9 +2,17 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Control Claude</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <!-- App do painel (PWA): instalar no celular e receber notificações -->
+  <link rel="manifest" href="/admin.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/admin-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Control Claude">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#c96442">
   <link rel="stylesheet" href="./src/style.css">
   <link rel="stylesheet" href="./src/controls.css">
 </head>
@@ -45,6 +53,7 @@
         <button data-tab="whatsapp">WhatsApp <span class="wa-dot" id="wa-dot"></span></button>
       </nav>
       <span class="muted user-email" id="user-email"></span>
+      <button id="push-btn" class="btn small push-btn" type="button" title="Notificações no celular" aria-label="Notificações no celular">🔔<span class="push-dot" id="push-dot"></span></button>
       <a href="/assinar" target="_blank" class="btn small sales-link">Página de vendas ↗</a>
       <button id="logout" class="btn small">Sair</button>
     </header>
@@ -220,6 +229,15 @@
       </section>
     </main>
   </div>
+
+  <!-- Notificações no celular (app do painel) -->
+  <dialog id="dlg-push">
+    <div class="push-dlg">
+      <h3>Notificações no celular</h3>
+      <div id="push-body"><p class="muted">Verificando…</p></div>
+      <div class="actions"><button class="btn" type="button" id="push-close">Fechar</button></div>
+    </div>
+  </dialog>
 
   <!-- Modal assinante -->
   <dialog id="dlg-sub">

@@ -22,6 +22,7 @@ function adminEmail(req) {
 }
 
 export const isAuthenticated = (req) => Boolean(adminEmail(req));
+export const currentAdmin = adminEmail;
 
 export function me(req, res) {
   const email = adminEmail(req);

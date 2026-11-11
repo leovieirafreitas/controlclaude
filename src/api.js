@@ -50,6 +50,10 @@ export const api = {
   whatsappQr: () => request('/whatsapp/qr', { method: 'POST' }),
   whatsappLogout: () => request('/whatsapp/logout', { method: 'POST' }),
   whatsappTest: () => request('/whatsapp/test', { method: 'POST' }),
+  push: (endpoint) => request(`/push${endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : ''}`),
+  pushSubscribe: (subscription) => request('/push/subscribe', { method: 'POST', body: { subscription } }),
+  pushUnsubscribe: (endpoint) => request('/push/unsubscribe', { method: 'POST', body: { endpoint } }),
+  pushTest: () => request('/push/test', { method: 'POST' }),
   pacing: () => request('/whatsapp/pacing'),
   savePacing: (body) => request('/whatsapp/pacing', { method: 'PUT', body }),
 
