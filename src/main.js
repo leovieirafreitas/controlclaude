@@ -7,6 +7,7 @@ import { initPayments, loadPayments } from './views/payments.js';
 import { initPlans, loadPlans } from './views/plans.js';
 import { initWhatsapp, loadWhatsapp, refreshWhatsappDot } from './views/whatsapp.js';
 import { enhanceControls } from './controls.js';
+import { initPush, refreshPush } from './push.js';
 
 enhanceControls(); // listas e calendários com o visual do site
 
@@ -19,7 +20,9 @@ const loaders = {
   whatsapp: loadWhatsapp,
 };
 
-let currentTab = 'dashboard';
+// Aba pelo endereço (#payments, #customers...): a notificação no celular abre direto na aba certa
+const tabFromHash = () => { const t = location.hash.slice(1); return loaders[t] ? t : null; };
+let currentTab = tabFromHash() || 'dashboard';
 const refresh = () => loaders[currentTab]().catch(() => {});
 
 function showTab(tab) {
@@ -45,10 +48,19 @@ function showApp(email) {
   showTab(currentTab);
   if (currentTab !== 'whatsapp') refreshWhatsappDot();
   if (currentTab !== 'customers') refreshCustomersDot();
+  refreshPush();
 }
 
 // ---------- eventos
 setUnauthorizedHandler(showLogin);
+
+initPush();
+window.addEventListener('hashchange', () => { const t = tabFromHash(); if (t && t !== currentTab) showTab(t); });
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data?.type !== 'open') return;
+  const t = String(e.data.hash || '').slice(1);
+  if (loaders[t] && !$('#app').classList.contains('hidden')) showTab(t);
+});
 
 $('#tabs').addEventListener('click', (e) => {
   if (e.target.dataset.tab) showTab(e.target.dataset.tab);

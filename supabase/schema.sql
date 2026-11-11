@@ -156,3 +156,21 @@ alter table public.subscribers add column if not exists autopay_failed_at timest
 
 -- v11: assinatura pelo link do Mercado Pago (o cliente autoriza na página do MP); id do link ainda não concluído
 alter table public.subscribers add column if not exists mp_preapproval_pending text;
+
+-- v12: notificações push do painel (app instalado no celular). Só o servidor acessa (RLS sem políticas).
+create table if not exists public.push_subscriptions (
+  endpoint     text primary key,            -- endereço do aparelho no serviço de push (Apple/Google/Mozilla)
+  p256dh       text not null,
+  auth         text not null,
+  admin_email  text not null,
+  user_agent   text,
+  created_at   timestamptz not null default now(),
+  last_ok_at   timestamptz
+);
+alter table public.push_subscriptions enable row level security;
+-- Chaves internas do servidor (ex.: par VAPID das notificações). Nunca públicas.
+create table if not exists public.app_secrets (
+  key   text primary key,
+  value text not null
+);
+alter table public.app_secrets enable row level security;

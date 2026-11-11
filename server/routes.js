@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { all, get, run } from './db.js';
 import { notifyAdmin, pacingStatus, savePacing, whatsappLogout, whatsappQr, whatsappStatus } from './whatsapp.js';
 import { setAutopayStatus, setAutopayAmount } from './mp.js';
+import { currentAdmin } from './auth.js';
+import { pushDevices, pushPublicKey, removePushSubscription, savePushSubscription, sendPush } from './push.js';
 
 export const api = Router();
 
@@ -344,6 +346,23 @@ api.post('/whatsapp/logout', h(evoSafe(async () => {
   await whatsappLogout();
   return whatsappStatus();
 })));
+// ---------------------------------------------------------------- notificações push (app do painel no celular)
+
+api.get('/push', h(async (req) => ({ public_key: await pushPublicKey(), devices: (await pushDevices(currentAdmin(req))).map((d) => ({ ...d, endpoint: undefined, current: d.endpoint === req.query.endpoint })) })));
+api.post('/push/subscribe', h(async (req) => {
+  await savePushSubscription(req.body?.subscription, currentAdmin(req), req.get('user-agent'));
+  return { ok: true };
+}));
+api.post('/push/unsubscribe', h(async (req) => {
+  await removePushSubscription(req.body?.endpoint);
+  return { ok: true };
+}));
+api.post('/push/test', h(async (req) => {
+  const r = await sendPush({ title: '✅ Notificações ativadas', body: 'Você vai ser avisado aqui de novos clientes e pagamentos.', tag: 'teste' }, { adminEmail: currentAdmin(req) });
+  if (!r.sent) throw new ApiError(400, 'Nenhum aparelho recebeu. Ative as notificações neste aparelho primeiro.');
+  return r;
+}));
+
 // Intervalo entre os avisos programados para clientes (anti-bloqueio do WhatsApp)
 api.get('/whatsapp/pacing', h(() => pacingStatus()));
 api.put('/whatsapp/pacing', h(async ({ body }) => {

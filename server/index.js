@@ -55,7 +55,8 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Rota não encontrad
 if (fs.existsSync(DIST)) {
   const page = (file) => (req, res) => res.sendFile(path.join(DIST, file));
   app.use(express.static(DIST, { index: false, maxAge: '7d', setHeaders: (res, file) => {
-    if (file.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+    // Páginas, service worker e manifesto do app: sempre a versão nova
+    if (file.endsWith('.html') || file.endsWith('-sw.js') || file.endsWith('.webmanifest')) res.setHeader('Cache-Control', 'no-cache');
   } }));
   app.get('/', page('assinar.html'));
   app.get('/assinar', page('assinar.html'));

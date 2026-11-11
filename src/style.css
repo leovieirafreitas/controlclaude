@@ -298,3 +298,15 @@ label.check input { width: auto; }
 .pm-icon { width: 15px; height: 15px; flex: none; vertical-align: -2px; }
 .pm-inline { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .pm-inline.m-pix .pm-icon { color: #32bcad; }
+
+/* ---------- notificações no celular (app do painel) */
+.push-btn { position: relative; padding-inline: 10px; }
+.push-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: transparent; }
+.push-dot.on { background: #2e9e5b; box-shadow: 0 0 0 2px var(--surface); }
+.push-dlg { padding: 20px; display: grid; gap: 12px; }
+.push-dlg h3 { margin: 0; }
+.push-dlg p { margin: 0; line-height: 1.5; }
+#push-body { display: grid; gap: 10px; }
+.push-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; line-height: 1.45; }
+.push-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+.push-pill.on { background: var(--ok-bg); color: var(--ok); }
