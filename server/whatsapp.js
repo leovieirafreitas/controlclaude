@@ -3,6 +3,7 @@
 import { all, get, run } from './db.js';
 import { setAutopayStatus } from './mp.js';
 import { firePush } from './push.js';
+import { render } from './templates.js';
 
 const URL = (process.env.EVOLUTION_URL || '').replace(/\/$/, '');
 const INSTANCE = process.env.EVOLUTION_INSTANCE || '';
@@ -102,6 +103,28 @@ const contactLines = (s) => [
   `📱 *WhatsApp:* ${s.phone || '—'}`,
 ];
 
+/** Valores das variáveis dos modelos ({nome}, {plano}...) para um assinante. */
+const varsFor = (s, extra = {}) => ({
+  nome: firstName(s.name), cliente: s.name || '', email: s.email || '', telefone: s.phone || '',
+  plano: s.plan_name || '', valor: s.price_cents != null ? brl(s.price_cents) : '',
+  dia_vencimento: s.due_day ?? '', cartao: s.card_last4 ? `final ${s.card_last4}` : '',
+  formas_pagamento: PAY_HOW, link: accountLink(), ...extra,
+});
+/** Modelo de WhatsApp pronto (ou null se desligado no painel). */
+const waText = (key, vars) => render(key, vars).catch((e) => { console.error('Modelo', key, e.message); return null; });
+/** Notificação push do painel a partir do modelo (não envia se estiver desligada). */
+/** Push que só pode sair uma vez (atraso, checkout): marca em notifications_sent. */
+async function pushOnce(key, subscriberId, ref, vars) {
+  const m = await render(key, vars).catch(() => null);
+  if (!m || !(await claim(key, subscriberId, ref))) return;
+  firePush({ ...m, tag: `${key}-${subscriberId}-${ref}` });
+}
+async function pushEvent(key, vars, tag) {
+  const m = await render(key, vars).catch(() => null);
+  if (m) firePush({ ...m, tag });
+  return Boolean(m);
+}
+
 // ------------------------------------------------------------------ eventos
 
 /** Pagamento aprovado pelo site: "nova assinatura" no 1º pagamento, "pagamento recebido" nos seguintes. */
@@ -112,15 +135,9 @@ export async function notifyPayment({ subscriberId, month, amountCents, method, 
   const how = autopay ? `${METHOD[method] || 'Cartão'} (renovação automática)` : METHOD[method] || method;
 
   // Notificação no app do painel (celular do admin)
-  firePush({
-    title: first ? 'Nova assinatura' : 'Pagamento recebido',
-    body: `${s.plan_name} · ${brl(amountCents)}`, // só plano e valor (sem nome do cliente na tela de bloqueio)
-    tag: `pagamento-${s.id}-${month}`,
-    url: '/admin#payments',
-  });
+  const pv = varsFor(s, { valor: brl(amountCents), forma: how, mes: fmtMonth(month) });
+  pushEvent(first ? 'push_nova_assinatura' : 'push_pagamento', pv, `pagamento-${s.id}-${month}`);
   if (!canSend) return;
-  const card = s.card_last4 ? ` final ${s.card_last4}` : '';
-
   if (whatsappConfigured) {
     fire(notifyAdmin([
       first ? '🎉 *Nova assinatura!*' : '💰 *Pagamento recebido*',
@@ -138,35 +155,17 @@ export async function notifyPayment({ subscriberId, month, amountCents, method, 
     ].filter((l) => l !== null).join('\n')));
   }
 
-  fire(notifyCustomer(s.phone, first
-    ? [
-      `Olá, ${firstName(s.name)}! 🎉`,
-      '',
-      `Sua assinatura do *${s.plan_name}* está ativa. Seja bem-vindo(a) à Control Claude!`,
-      '',
-      `💵 Pagamento de ${brl(amountCents)} via ${how} confirmado (${fmtMonth(month)}).`,
-      autopay
-        ? `🔁 A renovação é automática: todo mês, por volta do dia ${s.due_day}, cobramos no seu cartão${card}. Você não precisa fazer nada.`
-        : `📅 Sua mensalidade vence todo dia ${s.due_day}.`,
-      accountLink() ? `\nNa sua área você vê seus dados e pagamentos, troca o cartão ou cancela quando quiser:\n${accountLink()}` : null,
-      '',
-      'Qualquer dúvida, é só responder esta mensagem.',
-    ].filter((l) => l !== null).join('\n')
-    : [
-      `Olá, ${firstName(s.name)}! ✅`,
-      '',
-      autopay
-        ? `A renovação automática do seu plano foi feita: cobramos ${brl(amountCents)} no seu cartão${card}, referente a ${fmtMonth(month)}.`
-        : `Recebemos seu pagamento de ${brl(amountCents)} via ${how}, referente a ${fmtMonth(month)}.`,
-      `Seu plano *${s.plan_name}* segue ativo. Obrigado!`,
-    ].join('\n')));
+  const key = first ? (autopay ? 'wa_boas_vindas_auto' : 'wa_boas_vindas') : (autopay ? 'wa_renovacao' : 'wa_pagamento');
+  const text = await waText(key, pv);
+  if (text) fire(notifyCustomer(s.phone, text));
 }
 
 /** Cliente cancelou pela Área do assinante. `accessUntil` = último dia de acesso (null = acabou na hora). */
 export async function notifyCancel(subscriberId, accessUntil = null) {
-  if (!whatsappConfigured) return;
   const s = await subscriberInfo(subscriberId).catch(() => null);
   if (!s) return;
+  pushEvent('push_cancelamento', varsFor(s, { acesso_ate: accessUntil ? fmtDate(accessUntil) : 'hoje' }), `cancelamento-${s.id}`);
+  if (!whatsappConfigured) return;
   fire(notifyAdmin([
     '❌ *Assinatura cancelada pelo cliente*',
     '',
@@ -198,9 +197,10 @@ export async function notifyKeep(subscriberId) {
 
 /** Pagamento no cartão recusado pelo Mercado Pago na área do assinante (para o admin poder ajudar na hora). */
 export async function notifyCardRejected(subscriberId, { once = false, message = '' } = {}) {
-  if (!whatsappConfigured) return;
   const s = await subscriberInfo(subscriberId).catch(() => null);
   if (!s) return;
+  pushEvent('push_cartao_recusado', varsFor(s), `cartao-${s.id}`);
+  if (!whatsappConfigured) return;
   fire(notifyAdmin([
     once ? '💳 *Pagamento avulso no cartão recusado*' : '💳 *Renovação automática recusada pelo Mercado Pago*',
     '',
@@ -217,7 +217,7 @@ export async function notifyCardRejected(subscriberId, { once = false, message =
 
 /** Cliente criou a conta (ainda sem pagar). */
 export function notifySignup({ name, email, phone, birth_date }) {
-  firePush({ title: 'Novo cliente cadastrado', body: `${name}\n${email}${phone ? ' · ' + phone : ''}\nAinda sem pagamento`, tag: `cadastro-${email}`, url: '/admin#customers' });
+  pushEvent('push_cadastro', { cliente: name || '', email: email || '', telefone: phone || '' }, `cadastro-${email}`);
   if (!whatsappConfigured) return;
   fire(notifyAdmin([
     '🆕 *Nova conta criada* (ainda sem pagamento)',
@@ -318,6 +318,7 @@ export async function pacingStatus() {
  * fica para a próxima conferência (de hora em hora / a cada 10 min).
  */
 export async function sendScheduled(kind, subscriberId, ref, phone, text, opts = {}) {
+  if (!text) return false; // modelo desligado no painel
   queued++;
   const job = paceChain.then(async () => {
     try {
@@ -430,16 +431,7 @@ async function runCancellations(today) {
     }
 
     if (daysLeft <= RETENTION_DAYS && !s.retention_answer && s.phone && canSend) {
-      await sendScheduled('retencao', s.id, String(s.cancel_at), s.phone, [
-        `Oi, ${firstName(s.name)}! 👋`,
-        '',
-        `Você cancelou o plano *${s.plan_name}*, e seu acesso vai até *${until}*.`,
-        '',
-        '*Você quer continuar usando?*',
-        'Responda esta mensagem com:',
-        '👉 *SIM* — para continuar',
-        '👉 *NÃO* — para encerrar no dia ' + until,
-      ].join('\n'), { force: true });
+      await sendScheduled('retencao', s.id, String(s.cancel_at), s.phone, await waText('wa_retencao', varsFor(s, { acesso_ate: until })), { force: true });
     }
   }
 }
@@ -479,17 +471,11 @@ export async function handleIncomingMessage(fromNumber, text) {
     [fmtDate(new Date().toLocaleDateString('sv-SE', { timeZone: TZ })), s.id]);
     // a próxima mensalidade vence no último dia de acesso: o lembrete já vai nesta resposta
     const month = String(s.cancel_at).slice(0, 7);
-    await claim('lembrete', s.id, month);
     const resumed = await setAutopayStatus(s, 'authorized').catch((e) => { console.error('Mercado Pago (retomar renovação):', e.message); return false; });
     const autopay = resumed || s.autopay_status === 'authorized';
-    await notifyCustomer(s.phone, [
-      `Que ótimo, ${firstName(s.name)}! 🎉 Seu plano *${s.plan_name}* continua.`,
-      '',
-      autopay
-        ? `A renovação automática voltou: em *${until}* cobramos ${brl(s.price_cents)} no seu cartão${s.card_last4 ? ` final ${s.card_last4}` : ''}. Você não precisa fazer nada.`
-        : `A próxima mensalidade (${brl(s.price_cents)}) vence em *${until}*.`,
-      !autopay && accountLink() ? `Você pode pagar com ${PAY_HOW} aqui:\n👉 ${accountLink()}` : null,
-    ].filter((l) => l !== null).join('\n'), { force: true });
+    const simText = await waText(autopay ? 'wa_retencao_sim_auto' : 'wa_retencao_sim', varsFor(s, { acesso_ate: until }));
+    // a próxima mensalidade vence no último dia de acesso: se esta resposta saiu, ela já vale como lembrete do mês
+    if (simText && (await notifyCustomer(s.phone, simText, { force: true }))) await claim('lembrete', s.id, month);
     if (whatsappConfigured) {
       await notifyAdmin([
         '✅ *Cliente desistiu do cancelamento*',
@@ -503,11 +489,8 @@ export async function handleIncomingMessage(fromNumber, text) {
   }
 
   await run('UPDATE subscribers SET retention_answer = ? WHERE id = ?', ['nao', s.id]);
-  await notifyCustomer(s.phone, [
-    `Tudo bem, ${firstName(s.name)}. Seu acesso continua até *${until}* e depois o plano será encerrado.`,
-    '',
-    'Obrigado por ter sido nosso assinante! Se quiser voltar, é só assinar de novo pelo site. 💛',
-  ].join('\n'), { force: true });
+  const naoText = await waText('wa_retencao_nao', varsFor(s, { acesso_ate: until }));
+  if (naoText) await notifyCustomer(s.phone, naoText, { force: true });
   if (whatsappConfigured) {
     await notifyAdmin([
       '❌ *Cliente confirmou que NÃO vai continuar*',
@@ -539,42 +522,13 @@ async function noticesFor(s, month, daysLeft, due) {
   // Cliente ainda sem renovação automática (pagava por Pix ou cartão avulso): 5 dias antes do vencimento,
   // avisa que a partir desta mensalidade o pagamento passa a ser automático no cartão de crédito.
   if (daysLeft > REMINDER_DAYS && daysLeft <= CARD_NOTICE_DAYS && s.phone && CUSTOMER_ON) {
-    await sendScheduled('aviso_cartao', s.id, month, s.phone, [
-      `Olá, ${firstName(s.name)}! 👋`,
-      '',
-      `Um aviso rápido sobre a sua assinatura do *${s.plan_name}*:`,
-      '',
-      PIX_ON
-        ? `Novidade: a partir da próxima mensalidade (${due}) você pode ativar a *renovação automática no cartão de crédito*. Cadastra o cartão uma vez e todo mês a cobrança acontece sozinha, sem precisar lembrar de pagar. Se preferir, pode continuar pagando por *Pix* normalmente.`
-        : `A partir da próxima mensalidade (${due}), o pagamento passa a ser *automático no cartão de crédito*. Você cadastra o cartão uma vez e todo mês a cobrança acontece sozinha, sem precisar lembrar de pagar.`,
-      '',
-      accountLink()
-        ? `Uns dias antes do vencimento te mandamos o link para pagar. Se preferir, já pode fazer isso agora na sua área:\n👉 ${accountLink()}`
-        : 'Uns dias antes do vencimento te mandamos o link para pagar.',
-      '',
-      'Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do mês pago.',
-      '',
-      'Qualquer dúvida, é só responder esta mensagem.',
-    ].join('\n'));
+    await sendScheduled('aviso_cartao', s.id, month, s.phone, await waText('wa_aviso_cartao', varsFor(s, { vencimento: due })));
   }
 
   // Cliente: 3 dias antes (ou assim que entrar na janela)
   if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON) {
-    await sendScheduled('lembrete', s.id, month, s.phone, [
-      `Olá, ${firstName(s.name)}! 👋`,
-      '',
-      daysLeft === 0
-        ? `Sua mensalidade do *${s.plan_name}* (${value}) vence *hoje* (${due}).`
-        : `Sua mensalidade do *${s.plan_name}* (${value}) vence em *${plural(daysLeft)}*, no dia *${due}*.`,
-      '',
-      PIX_ON
-        ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
-        : 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.',
-      accountLink() ? `
-👉 Pagar agora: ${accountLink()}` : null,
-      '',
-      'Se já pagou, desconsidere esta mensagem. 😉',
-    ].filter((l) => l !== null).join('\n'));
+    await sendScheduled('lembrete', s.id, month, s.phone,
+      await waText(daysLeft === 0 ? 'wa_lembrete_hoje' : 'wa_lembrete', varsFor(s, { vencimento: due, dias: plural(daysLeft) })));
   }
 
   // Admin: 1 dia antes (ou no próprio dia, se a conferência de véspera não rodou)
@@ -594,15 +548,9 @@ async function noticesFor(s, month, daysLeft, due) {
   // Atraso: dia seguinte ao vencimento
   if (daysLeft < 0) {
     if (s.phone && CUSTOMER_ON) {
-      await sendScheduled('atraso_cliente', s.id, month, s.phone, [
-        `Olá, ${firstName(s.name)}.`,
-        '',
-        `Não identificamos o pagamento da mensalidade do *${s.plan_name}* (${value}), que venceu em ${due}.`,
-        accountLink() ? `\nVocê pode pagar agora com ${PAY_HOW}:\n👉 ${accountLink()}` : null,
-        '',
-        'Se já pagou, desconsidere. Qualquer dúvida, é só responder aqui.',
-      ].filter((l) => l !== null).join('\n'));
+      await sendScheduled('atraso_cliente', s.id, month, s.phone, await waText('wa_atraso', varsFor(s, { vencimento: due })));
     }
+    await pushOnce('push_atraso', s.id, month, varsFor(s, { vencimento: due }));
     if (whatsappConfigured && (await claim('atraso_admin', s.id, month))) {
       await notifyAdmin([
         '⚠️ *Mensalidade atrasada*',
@@ -628,30 +576,15 @@ async function autopayNoticesFor(s, month, daysLeft, due) {
   const card = s.card_last4 ? ` final *${s.card_last4}*` : '';
 
   if (daysLeft >= 0 && daysLeft <= REMINDER_DAYS && s.phone && CUSTOMER_ON) {
-    await sendScheduled('lembrete', s.id, month, s.phone, [
-      `Olá, ${firstName(s.name)}! 👋`,
-      '',
-      daysLeft === 0
-        ? `Hoje (${due}) cobramos a mensalidade do *${s.plan_name}* (${value}) no seu cartão${card}.`
-        : `No dia *${due}* vamos cobrar a mensalidade do *${s.plan_name}* (${value}) no seu cartão${card}.`,
-      '',
-      'É automático: você não precisa fazer nada. 😉',
-      accountLink() ? `\nPara trocar o cartão ou ver seus pagamentos: ${accountLink()}` : null,
-    ].filter((l) => l !== null).join('\n'));
+    await sendScheduled('lembrete', s.id, month, s.phone,
+      await waText(daysLeft === 0 ? 'wa_auto_hoje' : 'wa_auto_lembrete', varsFor(s, { vencimento: due })));
   }
 
   if (daysLeft <= -2) {
     if (s.phone && CUSTOMER_ON) {
-      await sendScheduled('atraso_cliente', s.id, month, s.phone, [
-        `Olá, ${firstName(s.name)}.`,
-        '',
-        `A cobrança automática da mensalidade do *${s.plan_name}* (${value}) no seu cartão${card} *não foi aprovada*.`,
-        'Pode ser limite, cartão vencido ou bloqueado.',
-        accountLink() ? `\nPara não perder o acesso, atualize o cartão aqui:\n👉 ${accountLink()}` : null,
-        '',
-        'Qualquer dúvida, é só responder esta mensagem.',
-      ].filter((l) => l !== null).join('\n'));
+      await sendScheduled('atraso_cliente', s.id, month, s.phone, await waText('wa_auto_recusada', varsFor(s, { vencimento: due })));
     }
+    await pushOnce('push_atraso', s.id, month, varsFor(s, { vencimento: due }));
     if (whatsappConfigured && (await claim('atraso_admin', s.id, month))) {
       await notifyAdmin([
         '⚠️ *Cobrança automática não passou*',
@@ -696,15 +629,9 @@ export async function runCheckoutReminders() {
     if (s.hours >= 24) {
       await claim('checkout_1h', s.id, 'inicio'); // passou do prazo do 1º lembrete: vai direto para o último
       if (s.phone && CUSTOMER_ON) {
-        await sendScheduled('checkout_24h', s.id, 'inicio', s.phone, [
-          `Oi, ${firstName(s.name)}! 😊`,
-          '',
-          `Sua assinatura do *${s.plan_name}* (${value}/mês) ainda está esperando o pagamento para ser ativada.`,
-          link ? `\nÉ rapidinho, com ${PAY_HOW}:\n👉 ${link}` : null,
-          '',
-          'Se tiver qualquer dúvida ou dificuldade para pagar, é só responder esta mensagem que a gente te ajuda.',
-        ].filter((l) => l !== null).join('\n'));
+        await sendScheduled('checkout_24h', s.id, 'inicio', s.phone, await waText('wa_checkout_24h', varsFor(s)));
       }
+      await pushOnce('push_checkout', s.id, 'inicio', varsFor(s));
       if (whatsappConfigured && (await claim('checkout_admin', s.id, 'inicio'))) {
         await notifyAdmin([
           '🕐 *Cliente não concluiu o pagamento (24h)*',
@@ -717,14 +644,7 @@ export async function runCheckoutReminders() {
         ].join('\n'));
       }
     } else if (s.phone && CUSTOMER_ON) {
-      await sendScheduled('checkout_1h', s.id, 'inicio', s.phone, [
-        `Oi, ${firstName(s.name)}! 👋`,
-        '',
-        `Vi que você escolheu o plano *${s.plan_name}* (${value}/mês), mas o pagamento ainda não foi concluído.`,
-        link ? `\nVocê pode pagar com ${PAY_HOW} aqui:\n👉 ${link}` : null,
-        '',
-        'Precisa de ajuda? É só responder esta mensagem.',
-      ].filter((l) => l !== null).join('\n'));
+      await sendScheduled('checkout_1h', s.id, 'inicio', s.phone, await waText('wa_checkout_1h', varsFor(s)));
     }
   }
 }

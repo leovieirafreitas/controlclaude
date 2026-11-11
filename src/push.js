@@ -2,7 +2,7 @@
 // iPhone: precisa do iOS 16.4+ e do painel adicionado à Tela de Início (abrir pelo ícone, não pelo Safari).
 import { api } from './api.js';
 import { $, esc, toast } from './utils.js';
-import { ICON_BELL, ICON_SHARE } from './icons.js';
+import { ICON_SHARE } from './icons.js';
 
 const SW_URL = '/admin-sw.js';
 const SCOPE = '/admin';
@@ -36,7 +36,7 @@ function keyBytes(base64url) {
 function setDot(on) {
   const dot = $('#push-dot');
   if (dot) dot.className = `push-dot${on ? ' on' : ''}`;
-  $('#push-btn')?.setAttribute('title', on ? 'Notificações ativadas neste aparelho' : 'Ativar notificações no celular');
+  dot?.setAttribute('title', on ? 'Notificações ativadas neste aparelho' : '');
 }
 
 function installSteps() {
@@ -46,12 +46,12 @@ function installSteps() {
       <li>Abra <strong>${esc(location.origin)}/admin</strong> no <strong>Safari</strong>.</li>
       <li>Toque em <strong>Compartilhar</strong> <span class="push-inline-icon">${ICON_SHARE}</span> (o quadrado com a seta para cima).</li>
       <li>Toque em <strong>Adicionar à Tela de Início</strong> → <strong>Adicionar</strong>.</li>
-      <li>Abra o app <strong>Control Claude</strong> pelo ícone na tela, entre com seu e-mail e toque no sino <span class="push-inline-icon">${ICON_BELL}</span> de novo.</li>
+      <li>Abra o app <strong>Control Claude</strong> pelo ícone na tela, entre com seu e-mail e abra <strong>Notificações</strong> no menu.</li>
     </ol>
     <p class="muted small">Precisa do iOS 16.4 ou mais novo (Ajustes → Geral → Sobre).</p>`;
 }
 
-async function render() {
+export async function loadPushDevice() {
   const body = $('#push-body');
   if (!supported()) {
     body.innerHTML = isIOS() && !isStandalone()
@@ -76,7 +76,7 @@ async function render() {
 
   const others = devices.filter((d) => !d.current).length;
   const otherLine = others ? `<p class="muted small">Também ${others === 1 ? 'há 1 outro aparelho' : `há ${others} outros aparelhos`} recebendo as notificações.</p>` : '';
-  const what = '<p class="muted small">Você recebe uma notificação quando: um <strong>cliente novo cria a conta</strong>, chega uma <strong>nova assinatura</strong> ou um <strong>pagamento</strong> (Pix, cartão ou renovação automática).</p>';
+  const what = '<p class="muted small">Os avisos chegam neste aparelho mesmo com o painel fechado. Escolha abaixo quais avisos quer receber e o texto de cada um.</p>';
 
   if (known) {
     body.innerHTML = `
@@ -99,7 +99,7 @@ async function enable(btn) {
   try {
     // Pedir a permissão primeiro, direto no toque (o iPhone exige isso)
     const perm = await Notification.requestPermission();
-    if (perm !== 'granted') { await render(); return; }
+    if (perm !== 'granted') { await loadPushDevice(); return; }
     const reg = await getRegistration();
     const { public_key } = await api.push();
     let sub = await reg.pushManager.getSubscription();
@@ -117,7 +117,7 @@ async function enable(btn) {
     toast(`Não foi possível ativar: ${err.message}`);
   } finally {
     btn.disabled = false;
-    await render();
+    await loadPushDevice();
   }
 }
 
@@ -132,14 +132,11 @@ async function disable(btn) {
     toast('Notificações desativadas neste aparelho.');
   } finally {
     btn.disabled = false;
-    await render();
+    await loadPushDevice();
   }
 }
 
 export function initPush() {
-  const dlg = $('#dlg-push');
-  $('#push-btn').addEventListener('click', () => { dlg.showModal(); render(); });
-  $('#push-close').addEventListener('click', () => dlg.close());
   $('#push-body').addEventListener('click', async (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;

@@ -5,9 +5,10 @@ import { initSubscribers, loadSubscribers } from './views/subscribers.js';
 import { initCustomers, loadCustomers, refreshCustomersDot } from './views/customers.js';
 import { initPayments, loadPayments } from './views/payments.js';
 import { initPlans, loadPlans } from './views/plans.js';
-import { initWhatsapp, loadWhatsapp, refreshWhatsappDot } from './views/whatsapp.js';
+import { initWhatsapp, loadWhatsapp, refreshWhatsappDot, resetPacingDraft } from './views/whatsapp.js';
 import { enhanceControls } from './controls.js';
-import { initPush, refreshPush } from './push.js';
+import { initPush, loadPushDevice, refreshPush } from './push.js';
+import { initTemplates, loadTemplates } from './views/templates.js';
 
 enhanceControls(); // listas e calendários com o visual do site
 
@@ -18,6 +19,8 @@ const loaders = {
   payments: loadPayments,
   plans: loadPlans,
   whatsapp: loadWhatsapp,
+  // Notificações: este aparelho + modelos das notificações push
+  notifications: async () => { loadTemplates($('#push-templates'), 'push'); await loadPushDevice(); },
 };
 
 // Aba pelo endereço (#payments, #customers...): a notificação no celular abre direto na aba certa
@@ -26,11 +29,24 @@ let currentTab = tabFromHash() || 'dashboard';
 const refresh = () => loaders[currentTab]().catch(() => {});
 
 function showTab(tab) {
+  if (tab !== currentTab || tab === 'whatsapp') resetPacingDraft(); // ao entrar na aba, o ritmo mostra o que está salvo
   currentTab = tab;
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('main > section').forEach((s) => s.classList.toggle('hidden', s.id !== `tab-${tab}`));
+  closeMenu();
+  window.scrollTo(0, 0);
   refresh();
 }
+
+// Menu lateral: no celular vira uma gaveta que abre pelo botão do topo
+function setMenu(open) {
+  const was = $('#app').classList.contains('menu-open');
+  $('#app').classList.toggle('menu-open', open);
+  $('#menu-btn').setAttribute('aria-expanded', String(open));
+  if (open && !was) $('#sidebar button.active')?.focus();
+  else if (!open && was && $('#sidebar').contains(document.activeElement)) $('#menu-btn').focus();
+}
+const closeMenu = () => setMenu(false);
 
 function showLogin() {
   $('#app').classList.add('hidden');
@@ -62,8 +78,14 @@ navigator.serviceWorker?.addEventListener('message', (e) => {
   if (loaders[t] && !$('#app').classList.contains('hidden')) showTab(t);
 });
 
+initTemplates($('#push-templates'));
+$('#menu-btn').addEventListener('click', () => setMenu(!$('#app').classList.contains('menu-open')));
+$('#side-overlay').addEventListener('click', closeMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
 $('#tabs').addEventListener('click', (e) => {
-  if (e.target.dataset.tab) showTab(e.target.dataset.tab);
+  const tab = e.target.closest('button[data-tab]')?.dataset.tab;
+  if (tab) showTab(tab);
 });
 
 // ---------- login por código
