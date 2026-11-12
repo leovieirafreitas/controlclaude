@@ -184,3 +184,8 @@ create index if not exists idx_login_codes_req on public.login_codes(scope, emai
 -- quem já assina continua pagando o valor com que assinou.
 alter table public.subscribers add column if not exists monthly_cents integer check (monthly_cents is null or monthly_cents >= 0);
 update public.subscribers s set monthly_cents = p.price_cents from public.plans p where p.id = s.plan_id and s.monthly_cents is null;
+
+-- v15: e-mail institucional (Google Workspace) criado para o assinante quando o plano é ativado
+alter table public.subscribers add column if not exists workspace_email      text;
+alter table public.subscribers add column if not exists workspace_created_at timestamptz;
+alter table public.subscribers add column if not exists workspace_error      text;

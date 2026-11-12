@@ -233,6 +233,42 @@ export async function notifyUnderpaid({ subscriberId, month, paidCents, lastCent
   ].join('\n')));
 }
 
+/**
+ * Resultado da criação do e-mail institucional (Google Workspace) do assinante.
+ * Vai só para o admin: e-mail + senha temporária para repassar ao cliente.
+ */
+export async function notifyWorkspace({ ok, subscriberId, email, password, error }) {
+  const s = await subscriberInfo(subscriberId).catch(() => null);
+  if (!s) return;
+  firePush(ok
+    ? { title: 'E-mail do membro criado', body: `${email}\n${s.plan_name}`, tag: `workspace-${s.id}`, url: '/admin#subscribers' }
+    : { title: 'Não foi possível criar o e-mail', body: `${s.name}: ${String(error).slice(0, 120)}`, tag: `workspace-${s.id}`, url: '/admin#subscribers' });
+  if (!whatsappConfigured) return;
+  await notifyAdmin(ok
+    ? [
+      '*E-mail do membro criado no Google Workspace*',
+      '',
+      ...contactLines(s),
+      `*Plano:* ${s.plan_name}`,
+      '',
+      `*E-mail:* ${email}`,
+      `*Senha temporária:* ${password}`,
+      '',
+      '_No primeiro acesso o Google pede para criar uma senha nova._',
+      'Entrar: https://accounts.google.com',
+      `${nowBR()}`,
+    ].join('\n')
+    : [
+      '*Não foi possível criar o e-mail do membro*',
+      '',
+      ...contactLines(s),
+      `*Plano:* ${s.plan_name}`,
+      `*Motivo:* ${error}`,
+      '',
+      'Crie pelo painel (Assinantes → Criar e-mail) depois de resolver, ou direto no Google Admin.',
+    ].join('\n'));
+}
+
 /** Cliente criou a conta (ainda sem pagar). */
 export function notifySignup({ name, email, phone, birth_date }) {
   pushEvent('push_cadastro', { cliente: name || '', email: email || '', telefone: phone || '' }, `cadastro-${email}`);

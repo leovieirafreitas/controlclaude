@@ -4,3 +4,8 @@ assinaturas.db*
 .DS_Store
 .env
 backup-*.db
+
+# Credenciais do Google (conta de serviço): nunca no Git
+google-service-account.json
+*service-account*.json
+google-env-easypanel.txt
