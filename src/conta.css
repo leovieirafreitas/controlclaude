@@ -24,8 +24,8 @@
 .fine.left { text-align: left; }
 
 /* campos (mesmo visual do checkout) */
-.account label { display: grid; gap: 6px; font-size: 14px; font-weight: 500; }
-.account input {
+.account label, .holder-box label { display: grid; gap: 6px; font-size: 14px; font-weight: 500; }
+.account input, .holder-box input {
   font: inherit;
   padding: 12px 14px;
   border-radius: 10px;
@@ -35,7 +35,7 @@
   width: 100%;
   min-height: 46px;
 }
-.account input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.account input:focus, .holder-box input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .account input:disabled { opacity: .65; }
 
 /* ---------- painel */
@@ -177,3 +177,14 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 .autopay-note strong { color: inherit; font-weight: 650; }
 #pay-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 #pay-tabs button .pm-icon { width: 17px; height: 17px; }
+
+/* checkout: dados do titular do cartão (passo antes do cartão) */
+.holder-box { display: grid; gap: 10px; }
+.holder-box .holder-title { font-weight: 650; margin: 0; }
+.holder-box .fine { text-align: left; margin: 0; }
+.holder-tips { margin: 2px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.holder-tips strong { color: inherit; }
+#holder-edit { margin: 6px 0 0; text-align: center; }
+#holder-edit a, #mp-link-alt a { color: var(--accent); }
+#mp-link-alt { text-align: center; margin: 4px 0 0; }
+.fine.lock svg { vertical-align: -2px; }

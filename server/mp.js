@@ -240,7 +240,7 @@ const autopayReject = (err) => {
   if (/CC_VAL_433|rejected|card_token|Invalid_payment_method|Unsupported_credit_card/i.test(msg)) {
     return /Unsupported_credit_card|Invalid_payment_method/i.test(msg)
       ? 'Este cartão não aceita cobrança mensal automática. Tente outro cartão de crédito.'
-      : 'O Mercado Pago não aprovou a renovação automática neste cartão agora.';
+      : 'O Mercado Pago não aprovou este cartão. Confira se nome, CPF e e-mail são do dono do cartão e se as compras online estão liberadas no app do banco. Se não der, tente outro cartão de crédito ou fale com a gente no WhatsApp.';
   }
   return null;
 };

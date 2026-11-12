@@ -56,6 +56,33 @@ function checkPhone(v) {
   return s;
 }
 
+function validCpf(d) {
+  if (!/^\d{11}$/.test(d) || /^(\d)\1{10}$/.test(d)) return false;
+  const dv = (n) => {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += Number(d[i]) * (n + 1 - i);
+    const r = (sum * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+}
+
+/**
+ * Dados do TITULAR do cartão (passo antes do cartão no checkout). O e-mail e o CPF vão para o
+ * Mercado Pago no lugar dos dados do cadastro: dados iguais aos do cartão = menos recusa no antifraude.
+ * Não guardamos o CPF.
+ */
+function checkHolder(v) {
+  if (!v || typeof v !== 'object') return null;
+  const name = oneLine(v.name).slice(0, 120);
+  const cpf = str(v.cpf).replace(/\D/g, '');
+  const email = str(v.email).trim().toLowerCase();
+  if (name.split(' ').length < 2) throw new ApiError(400, 'Digite o nome completo do titular do cartão.');
+  if (!validCpf(cpf)) throw new ApiError(400, 'CPF do titular inválido.');
+  if (email.length > 160 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw new ApiError(400, 'E-mail do titular inválido.');
+  return { name, cpf, email, phone: oneLine(v.phone).slice(0, 30) };
+}
+
 function checkNewPassword(pw) {
   const problem = checkPasswordRules(pw);
   if (problem) throw new ApiError(400, problem);
@@ -397,6 +424,15 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
     throw new ApiError(400, 'A renovação automática funciona só com cartão de crédito.');
   }
   const deviceId = str(req.body?.device_id).slice(0, 200) || undefined;
+  const holder = checkHolder(req.body?.holder);
+  if (holder) {
+    // o e-mail do titular vira o e-mail do pagador; o CPF digitado no cartão (token) prevalece se vier
+    card.payer = {
+      ...(card.payer || {}),
+      email: holder.email,
+      identification: card.payer?.identification?.number ? card.payer.identification : { type: 'CPF', number: holder.cpf },
+    };
+  }
 
   // Plano B antigo (desligado): pagar só este mês de forma avulsa no cartão.
   // Agora, se a assinatura não passar, o admin gera um Pix no painel e manda para o cliente.
@@ -415,11 +451,13 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   const result = await startAutopay({ ...sub, email: c.email }, plan, card, deviceId);
   if (result.status === 'rejected') {
     await run('UPDATE subscribers SET autopay_failed_at = now() WHERE id = ?', [sub.id]);
-    notifyCardRejected(sub.id, { once: false, message: result.reason || result.message });
+    const who = holder ? ` (titular: ${holder.name})` : '';
+    notifyCardRejected(sub.id, { once: false, message: (result.reason || result.message) + who });
   } else {
     await run('UPDATE subscribers SET autopay_failed_at = NULL WHERE id = ?', [sub.id]);
   }
-  return { ...result, view: await memberView(c) };
+  // pagamento avulso (plano B) está desligado: não oferecer na tela
+  return { ...result, allow_once: CARD_ONCE_ENABLED && Boolean(result.allow_once), view: await memberView(c) };
 })));
 
 /**

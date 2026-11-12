@@ -399,7 +399,14 @@ async function mountBrick() {
   mpInstance ||= new window.MercadoPago(state.mp_public_key, { locale: 'pt-BR' });
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
   brickController = await mpInstance.bricks().create('cardPayment', 'cardPaymentBrick_container', {
-    initialization: { amount: sub.plan.price_cents / 100, payer: { email: state.customer.email } },
+    // e-mail e CPF do TITULAR do cartão (passo anterior): o antifraude compara com os dados do cartão
+    initialization: {
+      amount: sub.plan.price_cents / 100,
+      payer: {
+        email: holder?.email || state.customer.email,
+        ...(holder?.cpf ? { identification: { type: 'CPF', number: holder.cpf } } : {}),
+      },
+    },
     customization: {
       // só cartão de crédito, à vista: é ele que o Mercado Pago cobra todo mês
       paymentMethods: { maxInstallments: 1, types: { excluded: ['debit_card'] } },
@@ -415,6 +422,7 @@ async function mountBrick() {
           body: {
             card: { ...formData, payment_type_id: additionalData?.paymentTypeId },
             mode: payMode === 'once' ? 'once' : undefined,
+            holder: holder || undefined,
             device_id: window.MP_DEVICE_SESSION_ID || undefined,
           },
         }).then(async (out) => {
@@ -469,7 +477,7 @@ function openPayment(mode = 'pay') {
     : mode === 'once'
       ? `Pague <strong>este mês (${price})</strong> no cartão de crédito, de forma avulsa (mensalidade de ${fmtMonth(sub.next_charge.month)}).
          No próximo vencimento, tentamos ativar a renovação automática outra vez.`
-    : `Assine pelo Mercado Pago: cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, no cartão que você escolher.
+    : `Cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, no mesmo cartão.
        Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do período pago, sem estorno.`;
   cardNote = $('#pay-month').innerHTML;
   $('#card-error').classList.add('hidden');
@@ -481,13 +489,73 @@ function openPayment(mode = 'pay') {
   stopPix();
   payMethod('card');
   $('#pay-dlg').showModal();
-  showCardForm(mode !== 'pay');
+  // assinar ou trocar cartão: primeiro os dados do titular; depois o formulário do cartão
+  if (mode === 'once') showCardForm(true);
+  else showHolderForm();
 }
 
-/** No modo "assinar", mostra o botão do Mercado Pago; nos outros (avulso, trocar cartão), o formulário do cartão. */
+// ------------------------------------------------------------------ passo 1: dados do titular do cartão
+
+let holder = null; // { name, cpf, email, phone } do dono do cartão (fica só nesta tela)
+
+const onlyDigits = (v) => String(v || '').replace(/\D/g, '');
+function validCpf(v) {
+  const d = onlyDigits(v);
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const dv = (n) => {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += Number(d[i]) * (n + 1 - i);
+    const r = (sum * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+}
+const fmtCpf = (v) => onlyDigits(v).slice(0, 11)
+  .replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/, '.$1-$2');
+
+function showHolderForm() {
+  const c = state.customer || {};
+  $('#h-name').value = holder?.name || c.name || '';
+  $('#h-cpf').value = holder?.cpf ? fmtCpf(holder.cpf) : '';
+  $('#h-email').value = holder?.email || c.email || '';
+  $('#h-phone').value = holder?.phone || c.phone || '';
+  $('#holder-error').classList.add('hidden');
+  $('#mp-link-alt').classList.toggle('hidden', payMode !== 'pay');
+  showCardForm(false);
+}
+
+$('#h-cpf').addEventListener('input', (e) => { e.target.value = fmtCpf(e.target.value); });
+
+$('#holder-box').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('#h-name').value.trim().replace(/\s+/g, ' ');
+  const cpf = onlyDigits($('#h-cpf').value);
+  const email = $('#h-email').value.trim().toLowerCase();
+  const phone = $('#h-phone').value.trim();
+  const fail = (msg, el) => {
+    $('#holder-error').textContent = msg;
+    $('#holder-error').classList.remove('hidden');
+    $(el).focus();
+  };
+  if (name.split(' ').length < 2 || name.length < 5) return fail('Digite o nome completo do titular (nome e sobrenome).', '#h-name');
+  if (!validCpf(cpf)) return fail('CPF inválido. Confira os números.', '#h-cpf');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fail('E-mail inválido.', '#h-email');
+  if (onlyDigits(phone).length < 10) return fail('Digite o celular com DDD.', '#h-phone');
+  holder = { name, cpf, email, phone };
+  showCardForm(true);
+});
+
+$('#holder-back').addEventListener('click', (e) => {
+  e.preventDefault();
+  showHolderForm();
+});
+
+/** form = true: formulário do cartão (Mercado Pago); false: passo dos dados do titular. */
 function showCardForm(form) {
-  $('#autopay-box').classList.toggle('hidden', form);
+  $('#holder-box').classList.toggle('hidden', form);
+  $('#holder-edit').classList.toggle('hidden', !form || payMode === 'once');
   $('#cardPaymentBrick_container').classList.toggle('hidden', !form);
+  $('#card-error').classList.add('hidden');
   if (!form) return unmountBrick();
   mountBrick().catch((err) => {
     console.error(err);
@@ -496,9 +564,12 @@ function showCardForm(form) {
   });
 }
 
+// alternativa: assinar pela página do Mercado Pago (para quem quer usar a conta de lá)
 $('#autopay-btn').addEventListener('click', async (e) => {
+  e.preventDefault();
   const btn = e.currentTarget;
-  btn.disabled = true;
+  if (btn.dataset.busy) return;
+  btn.dataset.busy = '1';
   btn.textContent = 'Abrindo o Mercado Pago…';
   $('#card-error').classList.add('hidden');
   try {
@@ -507,8 +578,8 @@ $('#autopay-btn').addEventListener('click', async (e) => {
   } catch (err) {
     $('#card-error').textContent = err.message;
     $('#card-error').classList.remove('hidden');
-    btn.disabled = false;
-    btn.textContent = 'Assinar pelo Mercado Pago';
+    delete btn.dataset.busy;
+    btn.textContent = 'Assinar pelo site do Mercado Pago';
   }
 });
 
