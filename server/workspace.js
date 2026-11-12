@@ -8,8 +8,10 @@
 //   GOOGLE_ADMIN_SUBJECT         super administrador do Workspace em nome de quem a conta de serviço age
 //   WORKSPACE_DOMAIN             domínio dos e-mails dos membros (padrão: controlclaude.com.br)
 //   WORKSPACE_AUTO_CREATE        off para desligar a criação automática (padrão: ligada quando configurado)
+//   WORKSPACE_GROUP              e-mail do grupo em que cada membro novo entra (ex.: o grupo "claudecode")
 // No Google Admin: Segurança → Controles de API → Delegação em todo o domínio → client_id da conta de serviço
-// com o escopo https://www.googleapis.com/auth/admin.directory.user
+// com os escopos https://www.googleapis.com/auth/admin.directory.user
+//                e https://www.googleapis.com/auth/admin.directory.group.member (para colocar no grupo)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -17,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 import { get, run } from './db.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/admin.directory.user';
+const GROUP_SCOPE = 'https://www.googleapis.com/auth/admin.directory.group.member';
+export const WORKSPACE_GROUP = (process.env.WORKSPACE_GROUP || '').trim().toLowerCase();
 const API = 'https://admin.googleapis.com/admin/directory/v1';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const WORKSPACE_DOMAIN = (process.env.WORKSPACE_DOMAIN || 'controlclaude.com.br').toLowerCase();
@@ -45,12 +49,13 @@ export const workspaceAuto = workspaceConfigured && AUTO;
 
 // ------------------------------------------------------------------ acesso (token OAuth da conta de serviço)
 
-let cached = { token: '', exp: 0 };
-async function accessToken() {
+const cachedByScope = new Map();
+async function accessToken(scope = SCOPE) {
+  const cached = cachedByScope.get(scope) || { token: '', exp: 0 };
   if (cached.token && Date.now() < cached.exp - 60_000) return cached.token;
   const now = Math.floor(Date.now() / 1000);
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  const unsigned = `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64({ iss: SA.client_email, sub: SUBJECT, scope: SCOPE, aud: SA.token_uri || 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 })}`;
+  const unsigned = `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64({ iss: SA.client_email, sub: SUBJECT, scope, aud: SA.token_uri || 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 })}`;
   const sig = crypto.createSign('RSA-SHA256').update(unsigned).sign(SA.private_key).toString('base64url');
   const res = await fetch(SA.token_uri || 'https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -60,14 +65,14 @@ async function accessToken() {
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j.access_token) throw new Error(`Google (acesso): ${j.error_description || j.error || res.status}`);
-  cached = { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
-  return cached.token;
+  cachedByScope.set(scope, { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 });
+  return j.access_token;
 }
 
-async function google(pathname, { method = 'GET', body } = {}) {
+async function google(pathname, { method = 'GET', body, scope = SCOPE } = {}) {
   const res = await fetch(`${API}${pathname}`, {
     method,
-    headers: { Authorization: `Bearer ${await accessToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { Authorization: `Bearer ${await accessToken(scope)}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(20_000),
   });
@@ -143,6 +148,16 @@ export async function createWorkspaceUser({ name }) {
   throw new Error('todos os e-mails possíveis para este nome já existem.');
 }
 
+/** Coloca o e-mail no grupo configurado (WORKSPACE_GROUP). Já ser membro conta como sucesso. */
+export async function addToGroup(email, group = WORKSPACE_GROUP) {
+  if (!group) return { skipped: true };
+  const r = await google(`/groups/${encodeURIComponent(group)}/members`, {
+    method: 'POST', scope: GROUP_SCOPE, body: { email, role: 'MEMBER', delivery_settings: 'ALL_MAIL' },
+  });
+  if (r.ok || r.status === 409) return { ok: true, group };
+  throw new Error(`grupo ${group}: ${r.data?.error?.message || r.status}`);
+}
+
 // ------------------------------------------------------------------ quando a assinatura é ativada
 
 /**
@@ -163,7 +178,18 @@ export async function provisionWorkspace(subscriberId, notify, { force = false }
     const { email, password } = await createWorkspaceUser({ name: sub.name });
     await run('UPDATE subscribers SET workspace_email = ?, workspace_created_at = now(), workspace_error = NULL WHERE id = ?', [email, sub.id]);
     console.log(`Google Workspace: conta ${email} criada (assinante ${sub.id})`);
-    await Promise.resolve(notify?.({ ok: true, subscriberId: sub.id, email, password })).catch((e) => console.error('Aviso da conta Google:', e.message));
+    // grupo: logo depois de criar (a conta nova às vezes demora uns segundos para aparecer no Google)
+    let group = null;
+    if (WORKSPACE_GROUP) {
+      for (let attempt = 1; attempt <= 3 && !group?.ok; attempt++) {
+        try { group = await addToGroup(email); } catch (err) {
+          group = { ok: false, error: err.message };
+          if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt));
+        }
+      }
+      if (!group.ok) console.error(`Google Workspace (grupo, assinante ${sub.id}):`, group.error);
+    }
+    await Promise.resolve(notify?.({ ok: true, subscriberId: sub.id, email, password, group })).catch((e) => console.error('Aviso da conta Google:', e.message));
     return { email };
   } catch (err) {
     console.error(`Google Workspace (assinante ${sub.id}):`, err.message);
@@ -176,7 +202,7 @@ export async function provisionWorkspace(subscriberId, notify, { force = false }
 
 /** Situação para o painel (sem segredos). */
 export async function workspaceStatus() {
-  return { configured: workspaceConfigured, auto: workspaceAuto, domain: WORKSPACE_DOMAIN, subject: SUBJECT || null };
+  return { configured: workspaceConfigured, auto: workspaceAuto, domain: WORKSPACE_DOMAIN, subject: SUBJECT || null, group: WORKSPACE_GROUP || null };
 }
 
 export const subscriberWorkspace = (id) => get('SELECT workspace_email, workspace_created_at, workspace_error FROM subscribers WHERE id = ?', [id]);

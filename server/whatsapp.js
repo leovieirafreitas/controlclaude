@@ -237,7 +237,7 @@ export async function notifyUnderpaid({ subscriberId, month, paidCents, lastCent
  * Resultado da criação do e-mail institucional (Google Workspace) do assinante.
  * Vai só para o admin: e-mail + senha temporária para repassar ao cliente.
  */
-export async function notifyWorkspace({ ok, subscriberId, email, password, error }) {
+export async function notifyWorkspace({ ok, subscriberId, email, password, error, group }) {
   const s = await subscriberInfo(subscriberId).catch(() => null);
   if (!s) return;
   firePush(ok
@@ -253,11 +253,13 @@ export async function notifyWorkspace({ ok, subscriberId, email, password, error
       '',
       `*E-mail:* ${email}`,
       `*Senha temporária:* ${password}`,
+      group?.ok ? `*Grupo:* adicionado em ${group.group}` : null,
+      group && !group.ok && !group.skipped ? `*Grupo:* NÃO foi adicionado (${group.error}). Adicione pelo Google Admin.` : null,
       '',
       '_No primeiro acesso o Google pede para criar uma senha nova._',
       'Entrar: https://accounts.google.com',
       `${nowBR()}`,
-    ].join('\n')
+    ].filter((l) => l !== null).join('\n')
     : [
       '*Não foi possível criar o e-mail do membro*',
       '',
