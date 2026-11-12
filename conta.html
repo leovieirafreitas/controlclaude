@@ -215,14 +215,26 @@
       <p class="autopay-note" id="pay-month"></p>
 
       <div id="pay-card">
-        <!-- renovação automática: o cliente assina na página do Mercado Pago -->
-        <div id="autopay-box" class="hidden">
-          <button type="button" class="btn btn-primary btn-lg btn-block" id="autopay-btn">Assinar pelo Mercado Pago</button>
-          <p class="fine">Você vai para a página segura do Mercado Pago, entra na sua conta (ou continua sem conta), escolhe o cartão e confirma. Depois volta para cá com o plano ativo.</p>
-          <p class="fine center-link hidden" id="pay-help">Não conseguiu pagar no cartão? <a class="support-link" href="#" target="_blank" rel="noopener">Fale com a gente no WhatsApp</a> que ajudamos você.</p>
-        </div>
+        <!-- passo 1: dados do TITULAR do cartão (o antifraude compara com o cartão) -->
+        <form id="holder-box" class="holder-box hidden" novalidate>
+          <p class="holder-title">Dados do titular do cartão</p>
+          <p class="fine">Preencha com os dados <strong>do dono do cartão</strong>, iguais aos do banco. Dados diferentes do cartão são o principal motivo de recusa.</p>
+          <label>Nome completo do titular<input id="h-name" autocomplete="cc-name" maxlength="120" required placeholder="Como está no cartão"></label>
+          <label>CPF do titular<input id="h-cpf" inputmode="numeric" autocomplete="off" maxlength="14" required placeholder="000.000.000-00"></label>
+          <label>E-mail do titular<input id="h-email" type="email" autocomplete="email" maxlength="160" required></label>
+          <label>Celular do titular<input id="h-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" required placeholder="(92) 90000-0000"></label>
+          <ul class="holder-tips">
+            <li>Use cartão de <strong>crédito</strong> (débito e pré-pago não aceitam cobrança mensal).</li>
+            <li>Deixe <strong>compras online</strong> liberadas no app do seu banco.</li>
+          </ul>
+          <p class="form-error hidden" id="holder-error"></p>
+          <button type="submit" class="btn btn-primary btn-lg btn-block">Continuar para o cartão</button>
+          <p class="fine center-link" id="mp-link-alt">Prefere pagar pela sua conta do Mercado Pago? <a href="#" id="autopay-btn">Assinar pelo site do Mercado Pago</a></p>
+        </form>
+        <p class="fine center-link hidden" id="holder-edit"><a href="#" id="holder-back">Alterar dados do titular</a></p>
         <div id="cardPaymentBrick_container"></div>
         <p class="form-error hidden" id="card-error"></p>
+        <p class="fine center-link hidden" id="pay-help">Não conseguiu pagar no cartão? <a class="support-link" href="#" target="_blank" rel="noopener">Fale com a gente no WhatsApp</a> que ajudamos você.</p>
       </div>
 
       <div id="pay-pix" class="hidden">
@@ -238,7 +250,7 @@
         <p class="form-error hidden" id="pix-error"></p>
       </div>
 
-      <p class="fine lock">🔒 Pagamento processado pelo Mercado Pago. Os dados do cartão não passam pelo nosso servidor.</p>
+      <p class="fine lock"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg> Pagamento processado pelo Mercado Pago. Os dados do cartão não passam pelo nosso servidor.</p>
     </div>
   </dialog>
 
