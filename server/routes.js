@@ -3,6 +3,8 @@ import { all, get, run } from './db.js';
 import { notifyAdmin, pacingStatus, savePacing, whatsappLogout, whatsappQr, whatsappStatus } from './whatsapp.js';
 import { mpConfigured, payWithPix, setAutopayStatus, setAutopayAmount, syncOrderId } from './mp.js';
 import { currentAdmin } from './auth.js';
+import { provisionWorkspace, subscriberWorkspace, workspaceConfigured, WORKSPACE_DOMAIN } from './workspace.js';
+import { notifyWorkspace } from './whatsapp.js';
 import { pushDevices, pushPublicKey, removePushSubscription, savePushSubscription, sendPush } from './push.js';
 import { fill, listTemplates, resetTemplate, sampleVars, saveTemplate, templateInfo } from './templates.js';
 
@@ -216,6 +218,19 @@ api.post('/subscribers/:id/pix', h(async ({ params }) => {
   }
   if (!pix.qr_code) throw new ApiError(502, 'O Mercado Pago não devolveu o código Pix. Tente de novo.');
   return { ...pix, month, amount_cents: plan.price_cents, plan_name: plan.name, name: sub.name, phone: sub.phone };
+}));
+
+// Cria o e-mail institucional (Google Workspace) do assinante na hora; os dados vão para o WhatsApp do admin
+api.post('/subscribers/:id/workspace', h(async ({ params }) => {
+  if (!workspaceConfigured) throw new ApiError(503, 'Google Workspace não configurado no servidor.');
+  const id = Number(params.id);
+  const cur = await subscriberWorkspace(id);
+  if (!cur) throw new ApiError(404, 'Assinante não encontrado.');
+  if (cur.workspace_email && !['(criando)', '(manual)'].includes(cur.workspace_email)) throw new ApiError(409, `Este assinante já tem o e-mail ${cur.workspace_email}.`);
+  const r = await provisionWorkspace(id, notifyWorkspace, { force: true });
+  const after = await subscriberWorkspace(id);
+  if (!r) throw new ApiError(502, `Não foi possível criar o e-mail: ${after?.workspace_error || 'tente de novo'}`);
+  return { ok: true, email: r.email, domain: WORKSPACE_DOMAIN };
 }));
 
 // A tela do Pix aberta no painel pergunta de tempos em tempos se já foi pago

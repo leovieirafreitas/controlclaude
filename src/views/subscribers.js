@@ -10,6 +10,15 @@ export async function loadSubscribers() {
   render();
 }
 
+/** E-mail institucional (Google Workspace) do assinante. */
+function workspaceLine(s) {
+  const w = s.workspace_email;
+  if (w && !w.startsWith('(')) return `<div class="ws-line" title="E-mail institucional (Google Workspace)">${esc(w)}</div>`;
+  if (w === '(criando)') return '<div class="muted small">Criando e-mail…</div>';
+  if (s.workspace_error) return `<div class="ws-line ws-error" title="${esc(s.workspace_error)}">E-mail não criado: ${esc(s.workspace_error.slice(0, 60))}</div>`;
+  return '';
+}
+
 function render() {
   const q = $('#sub-search').value.toLowerCase();
   const list = subscribers.filter((s) => !q || [s.name, s.email, s.phone].join(' ').toLowerCase().includes(q));
@@ -17,7 +26,7 @@ function render() {
   $('#sub-rows').innerHTML = list.map((s) => `
     <tr>
       <td><strong>${esc(s.name)}</strong>${s.notes ? `<div class="muted">${esc(s.notes)}</div>` : ''}</td>
-      <td>${esc(s.email)}<div class="muted">${esc(s.phone)}${s.birth_date ? ` · nasc. ${fmtDate(s.birth_date)}` : ''}</div></td>
+      <td>${esc(s.email)}<div class="muted">${esc(s.phone)}${s.birth_date ? ` · nasc. ${fmtDate(s.birth_date)}` : ''}</div>${workspaceLine(s)}</td>
       <td>${esc(s.plan_name)} <span class="muted">· ${brl(s.price_cents)}</span>${s.plan_price_cents != null && s.plan_price_cents !== s.price_cents ? `<div class="muted small" title="Valor travado de quando assinou">preço atual do plano: ${brl(s.plan_price_cents)}</div>` : ''}</td>
       <td>${fmtDate(s.start_date)}</td>
       <td>dia ${s.due_day}</td>
@@ -25,6 +34,7 @@ function render() {
       <td>
         ${s.status === 'aguardando' ? `<button class="btn small primary" data-activate="${s.id}">Ativar</button>` : ''}
         ${s.price_cents > 0 ? `<button class="btn small" data-pix="${s.id}" title="Gerar um Pix da mensalidade para mandar ao cliente">Gerar Pix</button>` : ''}
+        ${!s.workspace_email || s.workspace_email === '(manual)' ? `<button class="btn small" data-ws="${s.id}" title="Criar o e-mail institucional no Google Workspace">Criar e-mail</button>` : ''}
         <button class="btn small" data-edit="${s.id}">Editar</button>
         <button class="btn small danger" data-del="${s.id}">Excluir</button>
       </td>
@@ -63,7 +73,18 @@ export function initSubscribers(onChange) {
   $('#new-sub').addEventListener('click', () => openSubscriber());
 
   $('#sub-rows').addEventListener('click', async (e) => {
-    const { edit, del, activate, pix } = e.target.dataset;
+    const { edit, del, activate, pix, ws } = e.target.dataset;
+    if (ws) {
+      const s = subscribers.find((x) => x.id === Number(ws));
+      if (!confirm(`Criar agora o e-mail institucional de ${s.name} no Google Workspace? Usa uma licença do Google. Os dados vão para o seu WhatsApp.`)) return;
+      e.target.disabled = true;
+      e.target.textContent = 'Criando…';
+      try {
+        const r = await api.createWorkspace(s.id);
+        toast(`E-mail criado: ${r.email}. Os dados foram para o seu WhatsApp.`);
+      } catch { /* toast já mostrado */ }
+      return loadSubscribers();
+    }
     if (pix) return openAdminPix(subscribers.find((x) => x.id === Number(pix)), onChange);
     if (activate) {
       const s = subscribers.find((x) => x.id === Number(activate));

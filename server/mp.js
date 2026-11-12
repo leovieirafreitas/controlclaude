@@ -4,7 +4,8 @@
 // Os dados do cartão são tokenizados no navegador pelo SDK do Mercado Pago (Card Payment Brick);
 // o servidor só recebe o token.
 import { all, get, run } from './db.js';
-import { notifyPayment, notifyUnderpaid } from './whatsapp.js';
+import { notifyPayment, notifyUnderpaid, notifyWorkspace } from './whatsapp.js';
+import { provisionWorkspace } from './workspace.js';
 
 const TOKEN = process.env.MP_ACCESS_TOKEN || '';
 export const MP_PUBLIC_KEY = process.env.MP_PUBLIC_KEY || '';
@@ -70,14 +71,18 @@ function firstPayment(order) {
  * Impede trocar para um plano mais caro depois de gerar o Pix (ou o link) do plano mais barato.
  * Se faltar, o pagamento fica registrado (o dinheiro entrou), o plano não é ativado e o admin é avisado.
  */
-async function activateIfPaid(subId, month, paidNowCents) {
+export async function activateIfPaid(subId, month, paidNowCents) {
   const s = await get(`
     SELECT s.id, s.status, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid
     FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [month, subId]);
   if (!s) return false;
   if (Number(s.paid) >= Number(s.price_cents)) {
-    if (s.status !== 'ativo') await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [s.id]);
+    if (s.status !== 'ativo') {
+      await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [s.id]);
+      // Plano ATIVADO agora pelo pagamento (não é renovação): cria o e-mail institucional, se ainda não tem
+      provisionWorkspace(s.id, notifyWorkspace).catch((e) => console.error('Google Workspace:', e.message));
+    }
     return true;
   }
   console.warn(`Pagamento menor que o plano (assinante ${s.id}, ${month}): pago ${s.paid}, plano ${s.price_cents}`);
