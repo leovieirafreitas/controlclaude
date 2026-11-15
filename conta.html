@@ -246,6 +246,19 @@
           <label>CPF do titular<input id="h-cpf" inputmode="numeric" autocomplete="off" maxlength="14" required placeholder="000.000.000-00"></label>
           <label>E-mail do titular<input id="h-email" type="email" autocomplete="email" maxlength="160" required></label>
           <label>Celular do titular<input id="h-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" required placeholder="(92) 90000-0000"></label>
+          <!-- endereço de cobrança do titular: o Mercado Pago recomenda enviar (ajuda o antifraude a aprovar) -->
+          <p class="holder-title holder-sub">Endereço do titular</p>
+          <div class="holder-row">
+            <label>CEP<input id="h-cep" inputmode="numeric" autocomplete="postal-code" maxlength="9" required placeholder="00000-000"></label>
+            <label>Número<input id="h-number" autocomplete="off" maxlength="10" required placeholder="123"></label>
+          </div>
+          <p class="fine hidden" id="h-cep-info"></p>
+          <label>Rua<input id="h-street" autocomplete="address-line1" maxlength="120" required></label>
+          <label>Bairro<input id="h-district" autocomplete="address-level3" maxlength="80" required></label>
+          <div class="holder-row">
+            <label>Cidade<input id="h-city" autocomplete="address-level2" maxlength="80" required></label>
+            <label>Estado (UF)<input id="h-uf" autocomplete="address-level1" maxlength="2" required placeholder="AM"></label>
+          </div>
           <ul class="holder-tips">
             <li>Use cartão de <strong>crédito</strong> (débito e pré-pago costumam ser recusados).</li>
             <li>Deixe <strong>compras online</strong> liberadas no app do seu banco.</li>

@@ -624,12 +624,51 @@ function showHolderForm() {
   $('#h-cpf').value = holder?.cpf ? fmtCpf(holder.cpf) : '';
   $('#h-email').value = holder?.email || c.email || '';
   $('#h-phone').value = holder?.phone || c.phone || '';
+  const a = holder?.address || {};
+  $('#h-cep').value = a.zip ? fmtCep(a.zip) : '';
+  $('#h-number').value = a.number || '';
+  $('#h-street').value = a.street || '';
+  $('#h-district').value = a.district || '';
+  $('#h-city').value = a.city || '';
+  $('#h-uf').value = a.state || '';
+  $('#h-cep-info').classList.add('hidden');
   $('#holder-error').classList.add('hidden');
   $('#mp-link-alt').classList.toggle('hidden', payMode !== 'pay');
   showCardForm(false);
 }
 
 $('#h-cpf').addEventListener('input', (e) => { e.target.value = fmtCpf(e.target.value); });
+
+// CEP: formata e, com os 8 números, busca rua, bairro, cidade e estado (ViaCEP). Se a busca falhar, o cliente digita.
+const fmtCep = (v) => onlyDigits(v).slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2');
+let cepLookup = '';
+$('#h-cep').addEventListener('input', async (e) => {
+  e.target.value = fmtCep(e.target.value);
+  const cep = onlyDigits(e.target.value);
+  const info = $('#h-cep-info');
+  if (cep.length !== 8 || cep === cepLookup) return;
+  cepLookup = cep;
+  info.textContent = 'Buscando o endereço…';
+  info.classList.remove('hidden');
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    const d = await r.json();
+    if (onlyDigits($('#h-cep').value) !== cep) return; // o cliente já mudou o CEP
+    if (d.erro) { info.textContent = 'CEP não encontrado. Confira os números ou preencha o endereço abaixo.'; return; }
+    if (d.logradouro) $('#h-street').value = d.logradouro;
+    if (d.bairro) $('#h-district').value = d.bairro;
+    if (d.localidade) $('#h-city').value = d.localidade;
+    if (d.uf) $('#h-uf').value = d.uf;
+    info.classList.add('hidden');
+    if (!$('#h-number').value) $('#h-number').focus();
+  } catch {
+    cepLookup = '';
+    info.textContent = 'Não foi possível buscar o CEP agora. Preencha o endereço abaixo.';
+  }
+});
 
 $('#holder-box').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -646,9 +685,20 @@ $('#holder-box').addEventListener('submit', (e) => {
   if (!validCpf(cpf)) return fail('CPF inválido. Confira os números.', '#h-cpf');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fail('E-mail inválido.', '#h-email');
   if (onlyDigits(phone).length < 10) return fail('Digite o celular com DDD.', '#h-phone');
-  holder = { name, cpf, email, phone };
+  const one = (id) => $(id).value.trim().replace(/\s+/g, ' ');
+  const address = { zip: onlyDigits($('#h-cep').value), number: one('#h-number'), street: one('#h-street'), district: one('#h-district'), city: one('#h-city'), state: one('#h-uf').toUpperCase() };
+  if (address.zip.length !== 8) return fail('Digite o CEP com 8 números.', '#h-cep');
+  if (!address.number) return fail('Digite o número do endereço (ou S/N).', '#h-number');
+  if (address.street.length < 2) return fail('Digite a rua.', '#h-street');
+  if (address.district.length < 2) return fail('Digite o bairro.', '#h-district');
+  if (address.city.length < 2) return fail('Digite a cidade.', '#h-city');
+  if (!/^[A-Z]{2}$/.test(address.state)) return fail('Digite o estado com 2 letras (ex.: AM).', '#h-uf');
+  holder = { name, cpf, email, phone, address };
   showCardForm(true);
 });
+
+// ao corrigir um campo, o aviso de erro antigo some
+$('#holder-box').addEventListener('input', () => $('#holder-error').classList.add('hidden'));
 
 $('#holder-back').addEventListener('click', (e) => {
   e.preventDefault();
