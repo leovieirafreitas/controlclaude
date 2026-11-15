@@ -118,13 +118,14 @@ export const CATALOG = [
           : 'Para continuar, pague na sua área do assinante com *cartão de crédito*.', '',
       '👉 Pagar agora: {link}', '',
       'Se já pagou, desconsidere esta mensagem. 😉']) },
-  { key: 'wa_atraso', channel: 'whatsapp', group: 'Antes do vencimento', label: 'Mensalidade atrasada', hint: 'No dia seguinte ao vencimento, se não pagou.',
+  { key: 'wa_atraso', channel: 'whatsapp', group: 'Antes do vencimento', label: 'Plano desativado por atraso', hint: 'No dia seguinte ao vencimento, se não pagou: avisa que o plano foi desativado.',
     on: true, vars: ['nome', 'plano', 'valor', 'vencimento', 'formas_pagamento', 'link'], body: w([
       'Olá, {nome}.', '',
       'Não identificamos o pagamento da mensalidade do *{plano}* ({valor}), que venceu em {vencimento}.', '',
-      'Você pode pagar agora com {formas_pagamento}:',
+      'Por isso, seu plano foi *desativado* hoje.', '',
+      'Para reativar, é só pagar com {formas_pagamento}. O plano volta a ficar ativo assim que o pagamento for confirmado:',
       '👉 {link}', '',
-      'Se já pagou, desconsidere. Qualquer dúvida, é só responder aqui.']) },
+      'Se você já pagou, responda esta mensagem que a gente confere.']) },
 
   { key: 'wa_auto_lembrete', channel: 'whatsapp', group: 'Renovação automática', label: 'Aviso de cobrança no cartão', hint: 'Alguns dias antes da cobrança automática.',
     on: true, vars: ['nome', 'plano', 'valor', 'vencimento', 'cartao', 'link'], body: w([
@@ -138,12 +139,12 @@ export const CATALOG = [
       'Hoje ({vencimento}) cobramos a mensalidade do *{plano}* ({valor}) no seu cartão {cartao}.', '',
       'É automático: você não precisa fazer nada. 😉', '',
       'Para trocar o cartão ou ver seus pagamentos: {link}']) },
-  { key: 'wa_auto_recusada', channel: 'whatsapp', group: 'Renovação automática', label: 'Cobrança automática recusada', hint: '2 dias depois do vencimento, se o cartão não passou.',
+  { key: 'wa_auto_recusada', channel: 'whatsapp', group: 'Renovação automática', label: 'Cobrança automática recusada', hint: '2 dias depois do vencimento, se o cartão não passou: avisa que o plano foi desativado.',
     on: true, vars: ['nome', 'plano', 'valor', 'cartao', 'link'], body: w([
       'Olá, {nome}.', '',
       'A cobrança automática da mensalidade do *{plano}* ({valor}) no seu cartão {cartao} *não foi aprovada*.',
       'Pode ser limite, cartão vencido ou bloqueado.', '',
-      'Para não perder o acesso, atualize o cartão aqui:',
+      'Por isso, seu plano foi *desativado* hoje. Para reativar, atualize o cartão ou pague a mensalidade aqui:',
       '👉 {link}', '',
       'Qualquer dúvida, é só responder esta mensagem.']) },
 

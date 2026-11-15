@@ -10,7 +10,7 @@ const fmtMonth = (m) => `${m.slice(5, 7)}/${m.slice(0, 4)}`;
 const digits = (v) => String(v || '').replace(/\D/g, '');
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-const STATUS = { ativo: 'Ativo', aguardando: 'Aguardando pagamento', pausado: 'Pausado', cancelado: 'Cancelado' };
+const STATUS = { ativo: 'Ativo', aguardando: 'Aguardando pagamento', pausado: 'Desativado', cancelado: 'Cancelado' };
 const METHOD = { pix: 'Pix', credito: 'Cartão de crédito', debito: 'Cartão de débito', cartao: 'Cartão', boleto: 'Boleto', dinheiro: 'Dinheiro', transferencia: 'Transferência' };
 
 async function call(path, { method = 'GET', body } = {}) {
@@ -360,6 +360,7 @@ function render(data) {
       : next.current_paid
         ? (state.card_subscription ? 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp. Se quiser, ative a renovação automática no cartão ao pagar a próxima.'
           : 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp.')
+        : sub.status === 'pausado' ? `Seu plano está desativado por falta de pagamento. Pague a mensalidade de ${fmtMonth(next.month)} para reativar: o plano volta assim que o pagamento for confirmado.`
         : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
         : sub.first_charge ? firstChargeNote(sub).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
         : active && notDueYet(sub) ? `Próxima mensalidade (${fmtMonth(next.month)}): ${brl(sub.plan.price_cents)}, vence em ${fmtDate(dueDateOf(next.month, sub.due_day))}. Você já pode pagar${!state.card_enabled ? ' por Pix' : state.pix_enabled ? ' com cartão de crédito ou Pix' : ' no cartão de crédito'}.`

@@ -334,13 +334,18 @@ api.get('/payments', h(({ query }) => {
 api.post('/payments', h(async ({ body }) => {
   required(body, 'subscriber_id', 'ref_month');
   const sub = await get(`
-    SELECT s.id, COALESCE(s.monthly_cents, p.price_cents) AS price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [Number(body.subscriber_id)]);
+    SELECT s.id, s.status, COALESCE(s.monthly_cents, p.price_cents) AS price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [Number(body.subscriber_id)]);
   if (!sub) throw new ApiError(400, 'Assinante não encontrado');
   const amount = body.amount === undefined || body.amount === '' ? sub.price_cents : toCents(body.amount);
   const r = await run(`
     INSERT INTO payments (subscriber_id, ref_month, amount_cents, paid_at, method, notes)
     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`, [
     sub.id, checkMonth(body.ref_month), amount, checkDate(body.paid_at || todayISO()), str(body.method) || 'pix', str(body.notes)]);
+  // plano desativado por falta de pagamento: o pagamento lançado à mão reativa (se cobrir a mensalidade)
+  if (sub.status === 'pausado') {
+    const { activateIfPaid } = await import('./mp.js');
+    await activateIfPaid(sub.id, checkMonth(body.ref_month), amount).catch((e) => console.error('Reativar pelo pagamento manual:', e.message));
+  }
   return { id: r.rows[0].id };
 }));
 

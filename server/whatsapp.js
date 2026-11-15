@@ -580,6 +580,25 @@ export async function ensureIncomingWebhook(url) {
   console.log('WhatsApp: webhook de mensagens recebidas configurado');
 }
 
+// Passou do vencimento sem pagar: no dia seguinte o plano é DESATIVADO (status "pausado": guarda a vaga e reativa sozinho
+// quando o pagamento entra). AUTO_PAUSE_OVERDUE=off no .env desliga.
+const AUTO_PAUSE = !/^(off|0|false|nao|não)$/i.test(process.env.AUTO_PAUSE_OVERDUE || 'on');
+
+/** O aviso de atraso deste mês já chegou ao cliente (ou não há como avisar: sem telefone, mensagens desligadas, modelo desligado)? */
+export async function overdueTold(s, month, text) {
+  if (!s.phone || !CUSTOMER_ON || !text) return true;
+  return Boolean(await get('SELECT 1 AS x FROM notifications_sent WHERE kind = ? AND subscriber_id = ? AND ref = ?', ['atraso_cliente', s.id, month]));
+}
+
+/** Desativa o plano por falta de pagamento. Retorna true se desativou agora. */
+export async function pauseOverdue(s, due) {
+  if (!AUTO_PAUSE) return false;
+  const r = await run(`UPDATE subscribers SET status = 'pausado', notes = trim(coalesce(notes, '') || ' · Desativado por falta de pagamento (venceu em ' || ?::text || ')')
+    WHERE id = ? AND status = 'ativo'`, [due, s.id]);
+  if (r.rowCount) console.log(`Plano desativado por falta de pagamento: assinante ${s.id} (venceu em ${due})`);
+  return Boolean(r.rowCount);
+}
+
 async function noticesFor(s, month, daysLeft, due) {
   const value = brl(s.price_cents);
   const plural = (n) => `${n} dia${n > 1 ? 's' : ''}`;
@@ -612,21 +631,24 @@ async function noticesFor(s, month, daysLeft, due) {
     ].join('\n'));
   }
 
-  // Atraso: dia seguinte ao vencimento
+  // Atraso: no dia seguinte ao vencimento o cliente é avisado e o plano é desativado
   if (daysLeft < 0) {
-    if (s.phone && CUSTOMER_ON) {
-      await sendScheduled('atraso_cliente', s.id, month, s.phone, await waText('wa_atraso', varsFor(s, { vencimento: due })));
-    }
+    const text = await waText('wa_atraso', varsFor(s, { vencimento: due }));
+    if (s.phone && CUSTOMER_ON) await sendScheduled('atraso_cliente', s.id, month, s.phone, text);
+    // só desativa (e avisa o admin) depois que o aviso saiu para o cliente; se o envio ficou para depois, tenta na próxima hora
+    if (!(await overdueTold(s, month, text))) return;
+    const paused = await pauseOverdue(s, due);
     await pushOnce('push_atraso', s.id, month, varsFor(s, { vencimento: due }));
     if (whatsappConfigured && (await claim('atraso_admin', s.id, month))) {
       await notifyAdmin([
-        '⚠️ *Mensalidade atrasada*',
+        paused ? '⚠️ *Plano desativado por falta de pagamento*' : '⚠️ *Mensalidade atrasada*',
         '',
         ...contactLines(s),
         `📦 *Plano:* ${s.plan_name} (${value}/mês)`,
         `📅 *Venceu em:* ${due} (${plural(-daysLeft)} de atraso)`,
         `🧾 *Último mês pago:* ${s.last_paid_month ? fmtMonth(s.last_paid_month) : 'nenhum'}`,
-        s.phone && CUSTOMER_ON ? '\n_O cliente também recebeu um aviso no WhatsApp._' : null,
+        s.phone && CUSTOMER_ON ? '\n_O cliente foi avisado no WhatsApp._' : '\n_Cliente sem WhatsApp: não foi avisado._',
+        paused ? '*Remova o acesso dele no Claude.* Quando ele pagar, o plano reativa sozinho e você é avisado.' : null,
       ].filter((l) => l !== null).join('\n'));
     }
   }
@@ -648,13 +670,14 @@ async function autopayNoticesFor(s, month, daysLeft, due) {
   }
 
   if (daysLeft <= -2) {
-    if (s.phone && CUSTOMER_ON) {
-      await sendScheduled('atraso_cliente', s.id, month, s.phone, await waText('wa_auto_recusada', varsFor(s, { vencimento: due })));
-    }
+    const text = await waText('wa_auto_recusada', varsFor(s, { vencimento: due }));
+    if (s.phone && CUSTOMER_ON) await sendScheduled('atraso_cliente', s.id, month, s.phone, text);
+    if (!(await overdueTold(s, month, text))) return;
+    const paused = await pauseOverdue(s, due);
     await pushOnce('push_atraso', s.id, month, varsFor(s, { vencimento: due }));
     if (whatsappConfigured && (await claim('atraso_admin', s.id, month))) {
       await notifyAdmin([
-        '⚠️ *Cobrança automática não passou*',
+        paused ? '⚠️ *Plano desativado: a cobrança automática não passou*' : '⚠️ *Cobrança automática não passou*',
         '',
         ...contactLines(s),
         `📦 *Plano:* ${s.plan_name} (${value}/mês)`,
@@ -662,6 +685,7 @@ async function autopayNoticesFor(s, month, daysLeft, due) {
         `📅 *Venceu em:* ${due}`,
         `🧾 *Último mês pago:* ${s.last_paid_month ? fmtMonth(s.last_paid_month) : 'nenhum'}`,
         s.phone && CUSTOMER_ON ? '\n_O cliente recebeu o link para trocar o cartão. O Mercado Pago também tenta cobrar de novo._' : null,
+        paused ? '*Remova o acesso dele no Claude.* Quando o pagamento entrar, o plano reativa sozinho e você é avisado.' : null,
       ].filter((l) => l !== null).join('\n'));
     }
   }
@@ -782,4 +806,18 @@ export async function whatsappQr() {
 /** Desconecta o WhatsApp da instância (depois é preciso ler um novo QR Code). */
 export async function whatsappLogout() {
   await evo(`/instance/logout/${encodeURIComponent(INSTANCE)}`, 'DELETE');
+}
+
+/** Plano que estava desativado por falta de pagamento voltou a ficar ativo: avisa o admin para liberar o acesso de novo. */
+export async function notifyReactivated(subscriberId) {
+  const s = await subscriberInfo(subscriberId).catch(() => null);
+  if (!s || !whatsappConfigured) return;
+  await notifyAdmin([
+    '*Plano reativado: o cliente pagou*',
+    '',
+    ...contactLines(s),
+    `*Plano:* ${s.plan_name}`,
+    '',
+    '*Libere o acesso dele no Claude de novo.*',
+  ].join('\n'));
 }
