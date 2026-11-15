@@ -435,21 +435,24 @@ export async function runDailyNotices() {
   const today = now.toLocaleDateString('sv-SE', { timeZone: TZ });
   const thisMonth = today.slice(0, 7);
   const nextMonth = addMonths(thisMonth, 1);
+  const prevMonth = addMonths(thisMonth, -1); // vencimento no fim do mês: o dia seguinte já cai no mês seguinte
 
   const subs = await all(`
     SELECT s.id, s.name, s.email, s.phone, s.due_day, s.start_date, s.first_month, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            s.autopay_status, s.card_last4,
            (SELECT MAX(ref_month) FROM payments WHERE subscriber_id = s.id) AS last_paid_month,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this,
-           (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_next
+           (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_next,
+           (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_prev
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
-    WHERE s.status = 'ativo' AND COALESCE(s.monthly_cents, p.price_cents) > 0 AND s.cancel_at IS NULL`, [thisMonth, nextMonth]);
+    WHERE s.status = 'ativo' AND COALESCE(s.monthly_cents, p.price_cents) > 0 AND s.cancel_at IS NULL`, [thisMonth, nextMonth, prevMonth]);
 
   await runCancellations(today);
 
   for (const s of subs) {
-    for (const [month, paid] of [[thisMonth, s.paid_this], [nextMonth, s.paid_next]]) {
+    for (const [month, paid] of [[prevMonth, s.paid_prev], [thisMonth, s.paid_this], [nextMonth, s.paid_next]]) {
       if (paid >= s.price_cents) continue;                       // já pago
+      if (s.last_paid_month && s.last_paid_month > month) continue; // já pagou um mês mais novo: este ficou para trás
       // meses já cobertos pelo 1º pagamento: com pro rata vale o mês que ele quitou; sem, o mês da adesão
       if (s.first_month ? s.first_month >= month : String(s.start_date).slice(0, 7) >= month) continue;
       const dueISO = dueDate(month, s.due_day); // dia 30 em fevereiro: último dia do mês

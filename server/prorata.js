@@ -66,3 +66,45 @@ export function firstCharge(todayISO, dueDay, monthlyCents) {
   }
   return { cents: part, month: ym(y, m), days, part_cents: part, merged: false, next_due: dueISO };
 }
+
+// ------------------------------------------------------------------ qual mês está em cobrança
+
+/** Soma/subtrai meses de um AAAA-MM. */
+export function shiftMonth(month, n) {
+  const [y, m] = String(month).split('-').map(Number);
+  return ym(y, m + n);
+}
+
+// Mensalidade do mês passado vencida há poucos dias e não paga (vencimento no fim do mês: o dia seguinte já é outro mês):
+// durante este prazo ela continua sendo "a mensalidade em cobrança". Depois dele, o que se cobra é o mês atual.
+export const LATE_GRACE_DAYS = 15;
+
+/**
+ * Mês em cobrança hoje para um assinante.
+ *   sub: { start_date, due_day, first_month, first_cents } · price: mensalidade cheia (centavos)
+ *   paid: { this, prev, first } = total já pago no mês atual, no mês passado e no mês do 1º pagamento
+ * Retorna { month, due, paid, settled, next } — next = mês a cobrar agora (o próprio, ou o seguinte se já está quitado).
+ */
+export function currentCycle(todayISO, sub, price, paid = {}) {
+  const today = String(todayISO).slice(0, 10);
+  const now = today.slice(0, 7);
+  const prev = shiftMonth(now, -1);
+  const num = (v) => Number(v) || 0;
+  let month = now;
+  let got = num(paid.this);
+  if (sub.first_month && sub.first_month > now) {
+    // pro rata no fim do mês: o 1º pagamento quita o mês seguinte; nada é devido antes dele
+    month = sub.first_month;
+    got = num(paid.first);
+  } else {
+    // o mês passado está coberto pelo 1º pagamento? (com pro rata vale o mês que ele quitou; sem, o mês da adesão)
+    const covered = sub.first_month ? sub.first_month >= prev : String(sub.start_date).slice(0, 7) >= prev;
+    if (!covered && num(paid.prev) < price && num(paid.this) < price) {
+      const late = Math.round((Date.parse(today) - Date.parse(dueDate(prev, sub.due_day))) / 86_400_000);
+      if (late >= 0 && late <= LATE_GRACE_DAYS) { month = prev; got = num(paid.prev); }
+    }
+  }
+  const due = month === sub.first_month && sub.first_cents != null ? Number(sub.first_cents) : price;
+  const settled = got >= due;
+  return { month, due, paid: got, settled, next: settled ? shiftMonth(month, 1) : month };
+}
