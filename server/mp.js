@@ -157,7 +157,20 @@ function payerExtra(holder) {
   };
 }
 
-export async function payWithCard(sub, plan, month, card, deviceId, holder) {
+/**
+ * Histórico do comprador no nosso site, no formato que o Mercado Pago recomenda para aplicativos e plataformas online
+ * (additional_info com chaves "payer.*"): ajuda o antifraude a reconhecer cliente cadastrado e recorrente.
+ */
+function buyerHistory(h) {
+  if (!h) return null;
+  const iso = (v) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d.toISOString() : null; };
+  const info = { 'payer.authentication_type': 'WEB', 'payer.is_first_purchase_online': Boolean(h.first) };
+  if (iso(h.registered_at)) info['payer.registration_date'] = iso(h.registered_at);
+  if (iso(h.last_purchase)) info['payer.last_purchase'] = iso(h.last_purchase);
+  return info;
+}
+
+export async function payWithCard(sub, plan, month, card, deviceId, holder, history) {
   const type = card.payment_type_id || (String(card.payment_method_id).startsWith('deb') ? 'debit_card' : 'credit_card');
   const identification = card.payer?.identification?.number
     ? { type: card.payer.identification.type || 'CPF', number: String(card.payer.identification.number).replace(/\D/g, '') }
@@ -181,10 +194,14 @@ export async function payWithCard(sub, plan, month, card, deviceId, holder) {
   // Recomendações do Mercado Pago para aprovar mais:
   //  - 3DS "on_fraud_risk": quando o antifraude desconfia, em vez de recusar, pede a confirmação do banco do cliente
   //  - dados do produto (items)
+  //  - histórico do comprador no site (additional_info)
   const extras = CARD_3DS ? {
     config: { online: { transaction_security: { validation: 'on_fraud_risk', liability_shift: 'required' } } },
     items: [{ title: plan.name, description, quantity: 1, unit_price: money(plan.price_cents), category_id: 'services', external_code: `plano-${plan.id}` }],
   } : {};
+  const info = CARD_3DS ? buyerHistory(history) : null;
+  // tentativas, da mais completa para a mais simples: se o Mercado Pago não aceitar um campo novo (erro 400), cai para a seguinte
+  const bodies = [info ? { ...body, ...extras, additional_info: info } : null, CARD_3DS ? { ...body, ...extras } : null, body].filter(Boolean);
   const rejection = async (err) => {
     // Recusa do cartão: a Orders API devolve erro HTTP com o pedido (e o motivo) no corpo.
     const failedPay = err.data?.data?.transactions?.payments?.[0];
@@ -193,21 +210,16 @@ export async function payWithCard(sub, plan, month, card, deviceId, holder) {
     return { status: 'rejected', detail: failedPay.status_detail, message: rejectMessage(failedPay.status_detail) };
   };
   let order;
-  try {
-    order = await mp('/v1/orders', { method: 'POST', deviceId, body: { ...body, ...extras } });
-  } catch (err) {
-    const rejected = await rejection(err);
-    if (rejected) return rejected;
-    // Outros erros (formato, credencial) não são recusa. Se foi por causa dos campos novos, tenta do jeito antigo.
-    console.error('Pedido no cartão:', err.message);
-    if (!CARD_3DS || err.mpStatus !== 400) throw err;
+  for (const [i, attempt] of bodies.entries()) {
     try {
-      order = await mp('/v1/orders', { method: 'POST', deviceId, body });
-    } catch (err2) {
-      const rejected2 = await rejection(err2);
-      if (rejected2) return rejected2;
-      console.error(err2.message);
-      throw err2;
+      order = await mp('/v1/orders', { method: 'POST', deviceId, body: attempt });
+      break;
+    } catch (err) {
+      const rejected = await rejection(err);
+      if (rejected) return rejected;
+      // Outros erros (formato, credencial) não são recusa. Se foi por causa de um campo novo (400), tenta a versão mais simples.
+      console.error(`Pedido no cartão (tentativa ${i + 1} de ${bodies.length}):`, err.message);
+      if (err.mpStatus !== 400 || i === bodies.length - 1) throw err;
     }
   }
   await saveCheckout(sub, month, order, plan.price_cents);
