@@ -52,7 +52,7 @@ function checkDate(d) {
 
 function checkDueDay(v) {
   const d = Number(v);
-  if (!Number.isInteger(d) || d < 1 || d > 28) throw new ApiError(400, 'Dia de vencimento deve ser entre 1 e 28');
+  if (!Number.isInteger(d) || d < 1 || d > 30) throw new ApiError(400, 'Dia de vencimento deve ser entre 1 e 30');
   return d;
 }
 
@@ -391,9 +391,10 @@ api.get('/dashboard', h(async ({ query }) => {
       GROUP BY p.id ORDER BY p.price_cents DESC`),
   ]);
 
+  const lastDayOfMonth = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
   let expected = 0, coveredReceived = 0, paidCount = 0, overdueCount = 0;
   for (const s of subs) {
-    const duePassed = isPast || (isCurrent && todayDay > s.due_day);
+    const duePassed = isPast || (isCurrent && todayDay > Math.min(s.due_day, lastDayOfMonth)); // dia 30 em fevereiro: último dia
     expected += s.price_cents;
     coveredReceived += Math.min(s.paid_cents, s.price_cents);
     if (s.paid_cents >= s.price_cents) { s.pay_status = 'pago'; paidCount++; }

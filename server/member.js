@@ -7,7 +7,7 @@
 // Esqueci a senha: código por e-mail (Resend) + nova senha.
 import { Router } from 'express';
 import { all, get, run } from './db.js';
-import { firstCharge, prorataConfig } from './prorata.js';
+import { firstCharge, prorataConfig, dueDate } from './prorata.js';
 import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL, planSoldOut, checkSeats } from './routes.js';
 import { EMAIL_RE, OtpSilentError, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
@@ -609,12 +609,13 @@ async function paidAccessUntil(sub) {
   const row = await get(`
     SELECT MAX(ref_month) AS m FROM (
       SELECT pay.ref_month FROM payments pay JOIN subscribers s ON s.id = pay.subscriber_id JOIN plans p ON p.id = s.plan_id
-      WHERE pay.subscriber_id = ? GROUP BY pay.ref_month, s.monthly_cents, p.price_cents HAVING SUM(pay.amount_cents) >= COALESCE(s.monthly_cents, p.price_cents)
+      WHERE pay.subscriber_id = ? GROUP BY pay.ref_month, s.monthly_cents, p.price_cents, s.first_month, s.first_cents
+      HAVING SUM(pay.amount_cents) >= CASE WHEN pay.ref_month = s.first_month AND s.first_cents IS NOT NULL THEN s.first_cents ELSE COALESCE(s.monthly_cents, p.price_cents) END
     ) t`, [sub.id]);
   if (!row?.m) return null;
   const [y, m] = row.m.split('-').map(Number);
   const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
-  const until = `${next}-${String(sub.due_day).padStart(2, '0')}`;
+  const until = dueDate(next, sub.due_day);
   return until > todayISO() ? until : null;
 }
 
