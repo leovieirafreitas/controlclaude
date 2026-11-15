@@ -195,3 +195,9 @@ alter table public.subscribers add column if not exists workspace_error      tex
 -- separados por vírgula. plans.max_seats = máximo de vagas que um cliente pode comprar de uma vez (1 = só uma).
 alter table public.subscribers add column if not exists seats integer not null default 1 check (seats between 1 and 50);
 alter table public.plans add column if not exists max_seats integer not null default 1 check (max_seats between 1 and 50);
+
+-- v17: vencimento no mesmo dia para clientes novos, com o 1º pagamento proporcional (pro rata).
+-- first_month = mês (AAAA-MM) que o 1º pagamento quita · first_cents = valor desse 1º pagamento.
+-- Configuração em settings: prorata_on (on/off, padrão on) e prorata_day (1..28, padrão 5).
+alter table public.subscribers add column if not exists first_month text;
+alter table public.subscribers add column if not exists first_cents integer check (first_cents is null or first_cents >= 0);

@@ -61,6 +61,11 @@ function applySettings(settings) {
   }
   if (settings.headline) $('#headline').textContent = settings.headline;
   if (settings.subheadline) $('#subheadline').textContent = settings.subheadline;
+  // vencimento no mesmo dia para todos (1º pagamento proporcional)
+  if (!/^(off|0|false)$/i.test(settings.prorata_on || 'on') && $('#faq-due')) {
+    const day = Number(settings.prorata_day) || 5;
+    $('#faq-due').textContent = `Todo dia ${day}. No primeiro pagamento você paga só os dias até o próximo dia ${day} (valor proporcional) e, a partir daí, a mensalidade cheia todo dia ${day}. Avisamos você pelo WhatsApp antes do vencimento.`;
+  }
   const wa = waLink(settings.whatsapp, 'Olá! Tenho uma dúvida sobre os planos.');
   if (wa) {
     $('#wa-float').href = wa;

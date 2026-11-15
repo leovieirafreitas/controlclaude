@@ -7,6 +7,7 @@
 // Esqueci a senha: código por e-mail (Resend) + nova senha.
 import { Router } from 'express';
 import { all, get, run } from './db.js';
+import { firstCharge, prorataConfig } from './prorata.js';
 import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL, planSoldOut, checkSeats } from './routes.js';
 import { EMAIL_RE, OtpSilentError, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
@@ -102,12 +103,33 @@ const subscriptionOf = (customerId) => get('SELECT * FROM subscribers WHERE cust
 
 /** Mês que o assinante deve pagar agora: o atual, ou o próximo se o atual já está quitado. */
 export async function billingMonth(sub, priceCents) {
-  const month = todayISO().slice(0, 7);
+  // nada é devido antes do mês do 1º pagamento (pro rata no fim do mês: o 1º pagamento já quita o mês seguinte)
+  const now = todayISO().slice(0, 7);
+  const month = sub.first_month && sub.first_month > now ? sub.first_month : now;
+  // no mês do 1º pagamento proporcional, o valor devido é o proporcional
+  const due = month === sub.first_month && sub.first_cents != null ? Number(sub.first_cents) : priceCents;
   const { t: paid } = await get('SELECT COALESCE(SUM(amount_cents), 0) AS t FROM payments WHERE subscriber_id = ? AND ref_month = ?', [sub.id, month]);
-  if (paid < priceCents) return month;
+  if (paid < due) return month;
   const [y, m] = month.split('-').map(Number);
   const d = new Date(y, m, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Cobrança de agora: { month, cents }. Cliente novo com vencimento fixo e ainda sem pagamento:
+ * recalcula o 1º pagamento proporcional para HOJE e guarda (é com esse valor que o plano ativa).
+ */
+export async function chargeFor(sub, monthlyCents) {
+  if (sub.first_month && !(await get('SELECT 1 AS x FROM payments WHERE subscriber_id = ? LIMIT 1', [sub.id]))) {
+    const f = firstCharge(todayISO(), sub.due_day, monthlyCents);
+    const month = f ? f.month : todayISO().slice(0, 7);
+    const cents = f ? f.cents : monthlyCents;
+    if (month !== sub.first_month || cents !== Number(sub.first_cents)) {
+      await run('UPDATE subscribers SET first_month = ?, first_cents = ? WHERE id = ?', [month, cents, sub.id]);
+    }
+    return { month, cents, first: true };
+  }
+  return { month: await billingMonth(sub, monthlyCents), cents: monthlyCents, first: false };
 }
 
 async function currentCustomer(req) {
@@ -291,7 +313,8 @@ async function memberViewByEmail(email) {
     customerByEmail(email),
     get(`
       SELECT s.*, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, p.description AS plan_description, ${SOLD_OUT_SQL} AS plan_sold_out,
-             (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this_month
+             (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this_month,
+             (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = s.first_month) AS paid_first
       FROM subscribers s
       JOIN plans p ON p.id = s.plan_id
       JOIN customers c ON c.id = s.customer_id
@@ -310,17 +333,30 @@ async function memberViewByEmail(email) {
 
   let subscription = null;
   if (sub) {
-    let next = month;
-    if (sub.paid_this_month >= sub.price_cents) {
-      const [y, m] = month.split('-').map(Number);
+    // mês em cobrança: o atual, ou o do 1º pagamento se ele for de um mês à frente (pro rata no fim do mês)
+    const ahead = Boolean(sub.first_month && sub.first_month > month);
+    const cur = ahead ? sub.first_month : month;
+    const paidCur = Number(ahead ? sub.paid_first : sub.paid_this_month);
+    const dueCur = cur === sub.first_month && sub.first_cents != null ? Number(sub.first_cents) : sub.price_cents;
+    let next = cur;
+    if (paidCur >= dueCur) {
+      const [y, m] = cur.split('-').map(Number);
       const d = new Date(y, m, 1);
       next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+    // cliente novo com vencimento fixo e ainda sem pagamento: 1º pagamento proporcional, calculado para hoje
+    let first = null;
+    if (sub.first_month && !payments.length) {
+      const f = firstCharge(todayISO(), sub.due_day, sub.price_cents);
+      if (f) { first = { cents: f.cents, part_cents: f.part_cents, days: f.days, merged: f.merged, next_due: f.next_due }; next = f.month; }
+      else next = month;
     }
     subscription = {
       status: sub.status, start_date: sub.start_date, due_day: sub.due_day, cancel_at: sub.cancel_at || null, seats: Number(sub.seats) || 1,
       plan: { id: sub.plan_id, name: sub.plan_name, price_cents: sub.price_cents, description: sub.plan_description,
         sold_out: sub.plan_sold_out && !HOLDS_LICENSE.includes(sub.status) },
-      next_charge: { month: next, current_paid: next !== month },
+      next_charge: { month: next, current_paid: !first && next !== cur, amount_cents: first ? first.cents : sub.price_cents },
+      first_charge: first,
       // renovação automática no cartão (assinatura do Mercado Pago)
       // renovação automática recusada há menos de 7 dias: a tela vai direto para o pagamento avulso do mês
       autopay_blocked: CARD_SUBSCRIPTION && Boolean(sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS
@@ -384,11 +420,13 @@ memberApi.post('/subscribe', h(async (req) => {
   const total = plan.price_cents * seats;
 
   const today = todayISO();
+  let subId = sub?.id;
   if (!sub) {
-    await run(`
+    const ins = await run(`
       INSERT INTO subscribers (customer_id, name, email, phone, birth_date, plan_id, start_date, due_day, status, notes, monthly_cents, seats)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando', 'Cadastro pela área do assinante', ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando', 'Cadastro pela área do assinante', ?, ?) RETURNING id`,
     [c.id, c.name, c.email, c.phone, c.birth_date, plan.id, today, Math.min(Number(today.slice(8, 10)), 28), total, seats]);
+    subId = ins.rows[0].id;
   } else if (sub.plan_id !== plan.id) {
     await run("UPDATE subscribers SET plan_id = ?, monthly_cents = ?, seats = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END, mp_preapproval_pending = NULL WHERE id = ?", [plan.id, total, seats, sub.id]);
     // Link de assinatura gerado para o plano anterior deixa de valer (o valor era outro)
@@ -399,6 +437,20 @@ memberApi.post('/subscribe', h(async (req) => {
   } else if (sub.status === 'cancelado' || (sub.status === 'aguardando' && !(await get('SELECT 1 AS x FROM payments WHERE subscriber_id = ?', [sub.id])))) {
     // voltou depois de cancelar, ou ainda não tinha pago nada: assina pelo preço atual do plano (e pode mudar as vagas)
     await run('UPDATE subscribers SET monthly_cents = ?, seats = ? WHERE id = ?', [total, seats, sub.id]);
+  }
+
+  // Cliente NOVO (nunca pagou): vencimento no dia fixo, com o 1º pagamento proporcional (pro rata)
+  const neverPaid = !(await get('SELECT 1 AS x FROM payments WHERE subscriber_id = ? LIMIT 1', [subId]));
+  const now = await get('SELECT status, monthly_cents FROM subscribers WHERE id = ?', [subId]);
+  if (neverPaid && now.status === 'aguardando') {
+    const cfg = await prorataConfig();
+    if (cfg.on) {
+      const f = firstCharge(today, cfg.day, now.monthly_cents);
+      await run('UPDATE subscribers SET due_day = ?, start_date = ?, first_month = ?, first_cents = ? WHERE id = ?',
+        [cfg.day, today, f ? f.month : today.slice(0, 7), f ? f.cents : now.monthly_cents, subId]);
+    } else {
+      await run('UPDATE subscribers SET first_month = NULL, first_cents = NULL WHERE id = ?', [subId]);
+    }
   }
 
   const view = await memberView(c);
@@ -427,9 +479,11 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
   if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id, sub.seats)) throw new ApiError(409, SOLD_OUT_MSG);
   // Pix: paga a mensalidade em aberto (sem renovação automática; o cliente paga mês a mês)
+  // mês e valor desta cobrança (1º pagamento de cliente novo: proporcional)
+  const charge = await chargeFor(sub, plan.price_cents);
+  const chargePlan = { ...plan, price_cents: charge.cents };
   if (req.body?.method === 'pix') {
-    const month = await billingMonth(sub, plan.price_cents);
-    return { pix: await payWithPix({ ...sub, email: c.email }, plan, month), amount_cents: plan.price_cents };
+    return { pix: await payWithPix({ ...sub, email: c.email }, chargePlan, charge.month), amount_cents: charge.cents };
   }
   const card = req.body?.card || {};
   if (!card.token || !card.payment_method_id) throw new ApiError(400, 'Dados do cartão incompletos.');
@@ -454,7 +508,8 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (req.body?.mode === 'once' && !CARD_ONCE_ENABLED) {
     throw new ApiError(400, 'O pagamento é por assinatura no cartão de crédito. Se não conseguir, fale com a gente no WhatsApp que ajudamos você.');
   }
-  const blocked = !CARD_SUBSCRIPTION || sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
+  // 1º pagamento proporcional: sempre avulso (a assinatura do Mercado Pago cobraria o mês cheio)
+  const blocked = !CARD_SUBSCRIPTION || charge.first || sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
   if (req.body?.mode === 'once' || blocked) {
     if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
     // Antifraude recusou há pouco: tentar de novo em seguida piora (o Mercado Pago bloqueia as próximas tentativas)
@@ -462,8 +517,7 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
       const left = CARD_COOLDOWN_MS - (Date.now() - new Date(sub.autopay_failed_at).getTime());
       if (left > 0) throw new ApiError(429, cooldownMessage(left));
     }
-    const month = await billingMonth(sub, plan.price_cents);
-    const result = await payWithCard({ ...sub, email: c.email }, plan, month, card, deviceId, holder);
+    const result = await payWithCard({ ...sub, email: c.email }, chargePlan, charge.month, card, deviceId, holder);
     if (result.status === 'rejected') {
       notifyCardRejected(sub.id, { once: true, message: result.message + (holder ? ` (titular: ${holder.name})` : '') });
       if (!CARD_SUBSCRIPTION && isRiskReject(result.detail)) {
