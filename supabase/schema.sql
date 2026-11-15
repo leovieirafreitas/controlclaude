@@ -198,6 +198,6 @@ alter table public.plans add column if not exists max_seats integer not null def
 
 -- v17: vencimento no mesmo dia para clientes novos, com o 1º pagamento proporcional (pro rata).
 -- first_month = mês (AAAA-MM) que o 1º pagamento quita · first_cents = valor desse 1º pagamento.
--- Configuração em settings: prorata_on (on/off, padrão on) e prorata_day (1..28, padrão 5).
+-- Configuração em settings: prorata_on (on/off, padrão on) e prorata_day (1..28, padrão 28).
 alter table public.subscribers add column if not exists first_month text;
 alter table public.subscribers add column if not exists first_cents integer check (first_cents is null or first_cents >= 0);

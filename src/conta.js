@@ -366,7 +366,7 @@ function render(data) {
 
   $('#payments-card').classList.toggle('hidden', !sub);
   $('#payments').innerHTML = payments.length
-    ? payments.map((p) => `<tr><td>${fmtDate(p.paid_at)}</td><td>${fmtMonth(p.ref_month)}</td><td><span class="pm-inline m-${esc(p.method)}">${methodIcon(p.method)}${esc(METHOD[p.method] || p.method)}</span></td><td class="r">${brl(p.amount_cents)}</td></tr>`).join('')
+    ? payments.map((p) => `<tr><td>${fmtDate(p.paid_at)}</td><td>${sub && p.ref_month < String(sub.start_date).slice(0, 7) ? '1º pagamento' : fmtMonth(p.ref_month)}</td><td><span class="pm-inline m-${esc(p.method)}">${methodIcon(p.method)}${esc(METHOD[p.method] || p.method)}</span></td><td class="r">${brl(p.amount_cents)}</td></tr>`).join('')
     : '<tr><td colspan="4" class="empty">Nenhum pagamento ainda.</td></tr>';
 
   show('#panel');

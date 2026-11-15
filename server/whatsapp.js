@@ -448,8 +448,8 @@ export async function runDailyNotices() {
   for (const s of subs) {
     for (const [month, paid] of [[thisMonth, s.paid_this], [nextMonth, s.paid_next]]) {
       if (paid >= s.price_cents) continue;                       // já pago
-      if (String(s.start_date).slice(0, 7) >= month) continue;  // mês da adesão: coberto pelo 1º pagamento
-      if (s.first_month && s.first_month >= month) continue;     // pro rata: o 1º pagamento quitou até este mês
+      // meses já cobertos pelo 1º pagamento: com pro rata vale o mês que ele quitou; sem, o mês da adesão
+      if (s.first_month ? s.first_month >= month : String(s.start_date).slice(0, 7) >= month) continue;
       const dueISO = `${month}-${String(s.due_day).padStart(2, '0')}`;
       const daysLeft = daysBetween(today, dueISO);
       const due = fmtDate(dueISO);

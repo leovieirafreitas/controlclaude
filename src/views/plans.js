@@ -7,9 +7,9 @@ async function loadSettings() {
   const s = await api.settings();
   const f = $('#form-settings');
   for (const [k, v] of Object.entries(s)) if (f[k]) f[k].value = v;
-  // vencimento fixo (pro rata): sem nada salvo, vale ligado no dia 5
+  // vencimento fixo (pro rata): sem nada salvo, vale ligado no dia 28
   if (!s.prorata_on) f.prorata_on.value = 'on';
-  if (!s.prorata_day) f.prorata_day.value = 5;
+  if (!s.prorata_day) f.prorata_day.value = 28;
 }
 
 function licenses(p) {
