@@ -8,7 +8,7 @@ const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 // Mesma chave do member.js / whatsapp.js: com o Pix desligado, os textos padrão não podem oferecer Pix
 const PIX_ON = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'on');
 // mesma chave do member.js: cartão com assinatura (renovação automática) ou avulso (padrão)
-const CARD_SUB = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'off');
+const CARD_SUB = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on');
 
 /** Variáveis disponíveis (nome → explicação e exemplo para a pré-visualização e o teste). */
 export const VARS = {

@@ -25,8 +25,8 @@ const TERMS_VERSION = '2026-11-15';
 // Pix na área do assinante: ligado por padrão (o cartão às vezes é recusado pelo antifraude). PIX_ENABLED=off desliga.
 export const PIX_ENABLED = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'on');
 // Cartão: por padrão o cliente paga o mês de forma avulsa (pedido normal no Mercado Pago, sem assinatura),
-// porque o antifraude recusava quase toda assinatura. Para voltar à assinatura: CARD_SUBSCRIPTION=on no .env
-export const CARD_SUBSCRIPTION = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'off');
+// CARD_SUBSCRIPTION=off no .env: cartão avulso (um mês por vez). Padrão: assinatura com renovação automática (em teste desde 15/11/2026).
+export const CARD_SUBSCRIPTION = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on');
 const CARD_ONCE_ENABLED = !CARD_SUBSCRIPTION;
 // Depois de uma renovação automática recusada, espera 7 dias antes de tentar de novo (tentativas seguidas pioram o antifraude)
 const AUTOPAY_RETRY_MS = 7 * 24 * 3600_000;
