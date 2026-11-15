@@ -59,7 +59,11 @@ const REJECT_MSG = {
   cc_rejected_call_for_authorize: 'O banco pediu autorização. Ligue para o seu banco e tente de novo.',
   rejected_high_risk: 'O Mercado Pago recusou o pagamento na análise de segurança. Fale com a gente no WhatsApp que ajudamos você.',
   cc_rejected_high_risk: 'O Mercado Pago recusou o pagamento na análise de segurança. Fale com a gente no WhatsApp que ajudamos você.',
+  cc_rejected_3ds_challenge: 'A confirmação com o seu banco não foi concluída. Tente de novo e confirme a compra quando o banco pedir.',
+  expired: 'O tempo para confirmar a compra com o banco acabou. Tente de novo.',
 };
+// Recusas do antifraude: tentar de novo em seguida com os mesmos dados piora (o Mercado Pago bloqueia as próximas)
+export const isRiskReject = (detail) => /high_risk|blacklist/.test(String(detail || ''));
 const rejectMessage = (detail) => REJECT_MSG[detail] || 'O pagamento foi recusado. Confira os dados do cartão ou tente outro cartão de crédito.';
 
 function firstPayment(order) {
@@ -154,44 +158,83 @@ export async function payWithCard(sub, plan, month, card, deviceId, holder) {
   const identification = card.payer?.identification?.number
     ? { type: card.payer.identification.type || 'CPF', number: String(card.payer.identification.number).replace(/\D/g, '') }
     : undefined;
+  const description = `Mensalidade Control Claude ${month.slice(5)}/${month.slice(0, 4)}`;
+  const body = {
+    type: 'online',
+    processing_mode: 'automatic',
+    total_amount: money(plan.price_cents),
+    external_reference: extRef(sub.id, month),
+    description,
+    // dados do TITULAR do cartão (checkout): o antifraude compara com o cartão
+    payer: { email: card.payer?.email || sub.email, ...(identification ? { identification } : {}), ...payerExtra(holder) },
+    transactions: {
+      payments: [{
+        amount: money(plan.price_cents),
+        payment_method: { id: card.payment_method_id, type, token: card.token, installments: Number(card.installments) || 1 },
+      }],
+    },
+  };
+  // Recomendações do Mercado Pago para aprovar mais:
+  //  - 3DS "on_fraud_risk": quando o antifraude desconfia, em vez de recusar, pede a confirmação do banco do cliente
+  //  - dados do produto (items)
+  const extras = CARD_3DS ? {
+    config: { online: { transaction_security: { validation: 'on_fraud_risk', liability_shift: 'required' } } },
+    items: [{ title: plan.name, description, quantity: 1, unit_price: money(plan.price_cents), category_id: 'services', external_code: `plano-${plan.id}` }],
+  } : {};
+  const rejection = async (err) => {
+    // Recusa do cartão: a Orders API devolve erro HTTP com o pedido (e o motivo) no corpo.
+    const failedPay = err.data?.data?.transactions?.payments?.[0];
+    if (!failedPay?.status_detail) return null;
+    if (err.data.data.id) await saveCheckout(sub, month, err.data.data, plan.price_cents);
+    return { status: 'rejected', detail: failedPay.status_detail, message: rejectMessage(failedPay.status_detail) };
+  };
   let order;
   try {
-    order = await mp('/v1/orders', {
-      method: 'POST',
-      deviceId,
-      body: {
-        type: 'online',
-        processing_mode: 'automatic',
-        total_amount: money(plan.price_cents),
-        external_reference: extRef(sub.id, month),
-        description: `Mensalidade Control Claude ${month.slice(5)}/${month.slice(0, 4)}`,
-        // dados do TITULAR do cartão (checkout): o antifraude compara com o cartão
-        payer: { email: card.payer?.email || sub.email, ...(identification ? { identification } : {}), ...payerExtra(holder) },
-        transactions: {
-          payments: [{
-            amount: money(plan.price_cents),
-            payment_method: { id: card.payment_method_id, type, token: card.token, installments: Number(card.installments) || 1 },
-          }],
-        },
-      },
-    });
+    order = await mp('/v1/orders', { method: 'POST', deviceId, body: { ...body, ...extras } });
   } catch (err) {
-    // Recusa do cartão: a Orders API devolve erro HTTP com o pedido (e o motivo) no corpo.
-    // Outros erros (formato, credencial) não são recusa: sobem como erro do sistema.
-    const failedPay = err.data?.data?.transactions?.payments?.[0];
-    if (failedPay?.status_detail) {
-      if (err.data.data.id) await saveCheckout(sub, month, err.data.data, plan.price_cents);
-      return { status: 'rejected', message: rejectMessage(failedPay.status_detail) };
+    const rejected = await rejection(err);
+    if (rejected) return rejected;
+    // Outros erros (formato, credencial) não são recusa. Se foi por causa dos campos novos, tenta do jeito antigo.
+    console.error('Pedido no cartão:', err.message);
+    if (!CARD_3DS || err.mpStatus !== 400) throw err;
+    try {
+      order = await mp('/v1/orders', { method: 'POST', deviceId, body });
+    } catch (err2) {
+      const rejected2 = await rejection(err2);
+      if (rejected2) return rejected2;
+      console.error(err2.message);
+      throw err2;
     }
-    console.error(err.message);
-    throw err;
   }
   await saveCheckout(sub, month, order, plan.price_cents);
+  return orderOutcome(order);
+}
 
+// 3DS ligado por padrão; CARD_3DS=off no .env desliga
+const CARD_3DS = !/^(off|0|false|nao|não)$/i.test(process.env.CARD_3DS || 'on');
+
+/** Resultado de um pedido no cartão: aprovado, recusado, esperando a confirmação do banco (3DS) ou em análise. */
+async function orderOutcome(order) {
   if (await recordOrder(order) || order.status === 'processed') return { status: 'approved', message: 'Pagamento aprovado!' };
   const pay = firstPayment(order);
-  if (order.status === 'failed' || pay.status === 'failed') return { status: 'rejected', message: rejectMessage(pay.status_detail || order.status_detail) };
+  const detail = pay.status_detail || order.status_detail;
+  if (order.status === 'action_required' || pay.status === 'action_required') {
+    const url = pay.payment_method?.transaction_security?.url;
+    if (url && detail === 'pending_challenge') return { status: 'challenge', challenge_url: url, order_id: order.id, message: 'Confirme a compra com o seu banco.' };
+  }
+  if (['failed', 'canceled', 'cancelled', 'expired'].includes(order.status) || ['failed', 'canceled', 'cancelled'].includes(pay.status)) {
+    return { status: 'rejected', detail, message: rejectMessage(detail) };
+  }
   return { status: 'pending', message: 'Pagamento em análise. Avisaremos assim que for aprovado.' };
+}
+
+/** Depois da confirmação do banco (3DS): consulta o pedido e registra o pagamento se aprovou. */
+export async function cardOrderResult(orderId, subscriberId) {
+  const order = await mp(`/v1/orders/${encodeURIComponent(orderId)}`);
+  if (!String(order.external_reference || '').startsWith(`sub_${subscriberId}_`)) return null;
+  const out = await orderOutcome(order);
+  // ainda esperando o banco: não devolve a URL de novo
+  return out.status === 'challenge' ? { status: 'waiting', message: 'Aguardando a confirmação do banco…' } : out;
 }
 
 /** Gera um Pix. Retorna { order_id, qr_code, qr_code_base64, ticket_url } */

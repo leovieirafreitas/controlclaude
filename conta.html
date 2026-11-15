@@ -251,6 +251,14 @@
         </form>
         <p class="fine center-link hidden" id="holder-edit"><a href="#" id="holder-back">Alterar dados do titular</a></p>
         <div id="cardPaymentBrick_container"></div>
+        <!-- confirmação do banco (3DS): aparece quando o Mercado Pago pede para o cliente confirmar a compra -->
+        <div id="challenge-box" class="challenge-box hidden">
+          <p class="holder-title">Confirme a compra com o seu banco</p>
+          <p class="fine">Seu banco quer confirmar que é você. Siga as instruções abaixo (pode ser um código por SMS ou a aprovação no app do banco). Não feche esta janela.</p>
+          <iframe id="challenge-frame" title="Confirmação do banco" referrerpolicy="no-referrer"></iframe>
+          <p class="pix-wait"><span class="dot"></span> <span id="challenge-status">Aguardando a confirmação do banco…</span></p>
+          <button type="button" class="btn btn-outline btn-block" id="challenge-check">Já confirmei</button>
+        </div>
         <p class="form-error hidden" id="card-error"></p>
         <p class="fine center-link hidden" id="pay-help">Não conseguiu pagar no cartão? <a class="support-link" href="#" target="_blank" rel="noopener">Fale com a gente no WhatsApp</a> que ajudamos você.</p>
       </div>
