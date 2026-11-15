@@ -521,7 +521,10 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   let result;
   if (once) {
     if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
-    result = await payWithCard({ ...sub, email: c.email }, chargePlan, charge.month, card, deviceId, holder);
+    // histórico do comprador no site (recomendação do Mercado Pago para plataformas online)
+    const hist = await get('SELECT COUNT(*) AS n, MAX(paid_at) AS last FROM payments WHERE subscriber_id = ?', [sub.id]);
+    const history = { registered_at: c.created_at, first: Number(hist?.n || 0) === 0, last_purchase: hist?.last || null };
+    result = await payWithCard({ ...sub, email: c.email }, chargePlan, charge.month, card, deviceId, holder, history);
     if (result.status === 'rejected') notifyCardRejected(sub.id, { once: true, message: result.message + who });
   } else {
     result = await startAutopay({ ...sub, email: c.email }, plan, card, deviceId);
