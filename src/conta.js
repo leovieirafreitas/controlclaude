@@ -450,7 +450,11 @@ async function mountBrick() {
     customization: {
       // só cartão de crédito, à vista: é ele que o Mercado Pago cobra todo mês
       paymentMethods: { maxInstallments: 1, types: { excluded: ['debit_card'] } },
-      visual: { style: { theme: dark ? 'dark' : 'default' } },
+      visual: {
+        style: { theme: dark ? 'dark' : 'default' },
+        // textos mais claros (o padrão do Mercado Pago diz "crédito ou débito" e "data de vencimento")
+        texts: { formTitle: 'Cartão de crédito', expirationDate: { label: 'Validade do cartão' } },
+      },
     },
     callbacks: {
       onReady: () => {},
@@ -467,6 +471,7 @@ async function mountBrick() {
           },
         }).then(async (out) => {
           resolve();
+          if (out.status === 'challenge') return showChallenge(out);
           if (out.status === 'approved') {
             closePayment();
             render(out.view);
@@ -652,8 +657,85 @@ function stopPix() {
   pixTimer = null;
 }
 
+// ------------------------------------------------------------------ confirmação do banco (3DS)
+
+let challenge = null; // { orderId, timer, busy }
+
+function stopChallenge() {
+  if (challenge) clearInterval(challenge.timer);
+  challenge = null;
+  $('#challenge-box').classList.add('hidden');
+  $('#challenge-frame').removeAttribute('src');
+  $('#pay-tabs').classList.toggle('hidden', !(state?.pix_enabled && payMode !== 'card'));
+}
+
+/** Consulta o resultado do pedido. final = true depois que o banco avisou que terminou (insiste por mais tempo). */
+async function checkChallenge(showWaiting = false) {
+  if (!challenge || challenge.busy) return;
+  challenge.busy = true;
+  try {
+    const out = await call('/pay/challenge', { method: 'POST', body: { order_id: challenge.orderId } });
+    if (!challenge) return;
+    if (out.status === 'approved') {
+      closePayment();
+      render(out.view);
+      return flash('Pagamento aprovado! Seu plano está ativo.', 'ok');
+    }
+    if (out.status === 'rejected') {
+      stopChallenge();
+      state = out.view;
+      showHolderForm();
+      $('#card-error').textContent = out.message;
+      $('#card-error').classList.remove('hidden');
+      return;
+    }
+    if (out.status === 'pending') {
+      closePayment();
+      render(out.view);
+      return flash(out.message, 'warn');
+    }
+    if (showWaiting) $('#challenge-status').textContent = 'O banco ainda não confirmou. Conclua a confirmação acima.';
+  } catch { /* tenta de novo no próximo ciclo */ } finally {
+    if (challenge) challenge.busy = false;
+  }
+}
+
+async function showChallenge(out) {
+  await unmountBrick();
+  $('#cardPaymentBrick_container').classList.add('hidden');
+  $('#holder-edit').classList.add('hidden');
+  $('#card-error').classList.add('hidden');
+  $('#pay-tabs').classList.add('hidden');
+  $('#challenge-status').textContent = 'Aguardando a confirmação do banco…';
+  $('#challenge-frame').src = out.challenge_url;
+  $('#challenge-box').classList.remove('hidden');
+  const started = Date.now();
+  challenge = { orderId: out.order_id, busy: false, timer: null };
+  // confere a cada 5 s (o banco dá até 40 min para confirmar)
+  challenge.timer = setInterval(() => {
+    if (Date.now() - started > 40 * 60_000) {
+      stopChallenge();
+      showHolderForm();
+      $('#card-error').textContent = 'O tempo para confirmar com o banco acabou. Tente de novo.';
+      $('#card-error').classList.remove('hidden');
+      return;
+    }
+    checkChallenge();
+  }, 5000);
+}
+
+// o banco avisa (pelo iframe) que a confirmação terminou: confere o resultado na hora
+window.addEventListener('message', (e) => {
+  if (challenge && e.data?.status === 'COMPLETE') {
+    $('#challenge-status').textContent = 'Confirmando o pagamento…';
+    checkChallenge();
+  }
+});
+$('#challenge-check').addEventListener('click', () => checkChallenge(true));
+
 function closePayment() {
   stopPix();
+  stopChallenge();
   unmountBrick();
   if ($('#pay-dlg').open) $('#pay-dlg').close();
 }
@@ -661,7 +743,7 @@ function closePayment() {
 document.querySelectorAll('.pm-slot').forEach((el) => { el.outerHTML = methodIcon(el.dataset.icon); }); // ícones nas abas
 document.querySelectorAll('#pay-tabs button').forEach((b) => b.addEventListener('click', () => payMethod(b.dataset.method)));
 $('#pay-close').addEventListener('click', closePayment);
-$('#pay-dlg').addEventListener('cancel', () => { stopPix(); unmountBrick(); });
+$('#pay-dlg').addEventListener('cancel', () => { stopPix(); stopChallenge(); unmountBrick(); });
 
 $('#pix-btn').addEventListener('click', async (e) => {
   const btn = e.currentTarget;

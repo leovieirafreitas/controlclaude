@@ -11,7 +11,7 @@ import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQ
 import { EMAIL_RE, OtpSilentError, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
 import { notifyCancel, notifyKeep, notifySignup, notifyCardRejected } from './whatsapp.js';
-import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay, createAutopayLink, checkPendingAutopay, cancelPreapproval } from './mp.js';
+import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay, createAutopayLink, checkPendingAutopay, cancelPreapproval, cardOrderResult, isRiskReject } from './mp.js';
 
 // Assinaturas nesses status já ocupam uma licença do plano: podem pagar mesmo com o plano esgotado.
 const HOLDS_LICENSE = ['ativo', 'pausado'];
@@ -30,6 +30,9 @@ export const CARD_SUBSCRIPTION = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBS
 const CARD_ONCE_ENABLED = !CARD_SUBSCRIPTION;
 // Depois de uma renovação automática recusada, espera 7 dias antes de tentar de novo (tentativas seguidas pioram o antifraude)
 const AUTOPAY_RETRY_MS = 7 * 24 * 3600_000;
+// Cartão avulso recusado pelo antifraude: espera antes de deixar tentar de novo no cartão (o Pix continua liberado)
+const CARD_COOLDOWN_MS = 30 * 60_000;
+const cooldownMessage = (ms) => `O Mercado Pago recusou este cartão na análise de segurança. Tentar de novo agora piora a análise: aguarde ${Math.max(1, Math.ceil(ms / 60_000))} minutos para tentar no cartão${PIX_ENABLED ? ' ou pague agora por Pix (aba Pix, acima)' : ''}.`;
 export const memberSession = makeSession({ cookie: 'msid', maxAgeMs: 30 * 24 * 3600_000, sameSite: 'lax' });
 
 // ------------------------------------------------------------------ helpers
@@ -452,9 +455,23 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   const blocked = !CARD_SUBSCRIPTION || sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
   if (req.body?.mode === 'once' || blocked) {
     if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
+    // Antifraude recusou há pouco: tentar de novo em seguida piora (o Mercado Pago bloqueia as próximas tentativas)
+    if (!CARD_SUBSCRIPTION && sub.autopay_failed_at) {
+      const left = CARD_COOLDOWN_MS - (Date.now() - new Date(sub.autopay_failed_at).getTime());
+      if (left > 0) throw new ApiError(429, cooldownMessage(left));
+    }
     const month = await billingMonth(sub, plan.price_cents);
     const result = await payWithCard({ ...sub, email: c.email }, plan, month, card, deviceId, holder);
-    if (result.status === 'rejected') notifyCardRejected(sub.id, { once: true, message: result.message + (holder ? ` (titular: ${holder.name})` : '') });
+    if (result.status === 'rejected') {
+      notifyCardRejected(sub.id, { once: true, message: result.message + (holder ? ` (titular: ${holder.name})` : '') });
+      if (!CARD_SUBSCRIPTION && isRiskReject(result.detail)) {
+        await run('UPDATE subscribers SET autopay_failed_at = now() WHERE id = ?', [sub.id]);
+        result.message = cooldownMessage(CARD_COOLDOWN_MS);
+        result.cooldown = true;
+      }
+    } else if (result.status === 'approved' && !CARD_SUBSCRIPTION && sub.autopay_failed_at) {
+      await run('UPDATE subscribers SET autopay_failed_at = NULL WHERE id = ?', [sub.id]);
+    }
     return { ...result, view: await memberView(c) };
   }
 
@@ -468,6 +485,20 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   }
   // pagamento avulso (plano B) está desligado: não oferecer na tela
   return { ...result, allow_once: false, view: await memberView(c) };
+})));
+
+/** Depois da confirmação do banco (3DS): diz se o pagamento do cartão foi aprovado. */
+memberApi.post('/pay/challenge', h(mpSafe(async (req) => {
+  const c = await currentCustomer(req);
+  const sub = await requireSubscription(c);
+  const orderId = str(req.body?.order_id);
+  if (!/^ORD[A-Z0-9]+$/.test(orderId)) throw new ApiError(400, 'Pedido inválido.');
+  const result = await cardOrderResult(orderId, sub.id);
+  if (!result) throw new ApiError(404, 'Pedido não encontrado.');
+  if (result.status === 'rejected' && !CARD_SUBSCRIPTION && isRiskReject(result.detail)) {
+    await run('UPDATE subscribers SET autopay_failed_at = now() WHERE id = ?', [sub.id]);
+  }
+  return { ...result, view: await memberView(c) };
 })));
 
 /**
