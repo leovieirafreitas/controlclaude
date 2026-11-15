@@ -17,6 +17,7 @@ const REMINDER_DAYS = Math.max(0, Number(process.env.REMINDER_DAYS_BEFORE ?? 3) 
 // Aviso de que o pagamento passa a ser automático no cartão (clientes sem renovação automática), em dias antes do vencimento
 // Pix como alternativa ao cartão (mesma chave do member.js): muda os textos dos lembretes
 const PIX_ON = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'off'); // mesma chave do member.js (padrão: desligado)
+const CARD_SUB = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'off'); // cartão com assinatura? (padrão: avulso)
 const PAY_HOW = PIX_ON ? 'cartão de crédito ou Pix' : 'cartão de crédito';
 const CARD_NOTICE_DAYS = Math.max(REMINDER_DAYS + 1, Number(process.env.CARD_NOTICE_DAYS_BEFORE ?? 5) || 5);
 // Quantos dias antes do fim do acesso perguntar se o cliente quer continuar
@@ -577,7 +578,8 @@ async function noticesFor(s, month, daysLeft, due) {
 
   // Cliente ainda sem renovação automática (pagava por Pix ou cartão avulso): 5 dias antes do vencimento,
   // avisa que a partir desta mensalidade o pagamento passa a ser automático no cartão de crédito.
-  if (daysLeft > REMINDER_DAYS && daysLeft <= CARD_NOTICE_DAYS && s.phone && CUSTOMER_ON) {
+  // (só quando o cartão é por assinatura: no cartão avulso não há o que avisar)
+  if (CARD_SUB && daysLeft > REMINDER_DAYS && daysLeft <= CARD_NOTICE_DAYS && s.phone && CUSTOMER_ON) {
     await sendScheduled('aviso_cartao', s.id, month, s.phone, await waText('wa_aviso_cartao', varsFor(s, { vencimento: due })));
   }
 
