@@ -11,7 +11,7 @@ import { firstCharge, prorataConfig, dueDate } from './prorata.js';
 import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL, planSoldOut, checkSeats } from './routes.js';
 import { EMAIL_RE, OtpSilentError, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
-import { notifyCancel, notifyKeep, notifySignup, notifyCardRejected } from './whatsapp.js';
+import { notifyCancel, notifyKeep, notifySignup, notifyCardRejected, notifyAdmin } from './whatsapp.js';
 import { mpConfigured, MP_PUBLIC_KEY, payWithCard, payWithPix, syncOrderId, syncSubscriber, startAutopay, changeAutopayCard, setAutopayStatus, setAutopayAmount, syncAutopay, createAutopayLink, checkPendingAutopay, cancelPreapproval, cardOrderResult, isRiskReject } from './mp.js';
 
 // Assinaturas nesses status já ocupam uma licença do plano: podem pagar mesmo com o plano esgotado.
@@ -174,6 +174,16 @@ const mpSafe = (fn) => async (...args) => {
   } catch (err) {
     if (String(err.message).startsWith('Mercado Pago')) {
       console.error(err.message);
+      // Erro do Mercado Pago que NÃO é recusa de cartão: avisa o admin com o motivo (o servidor não guarda registros)
+      const req = args[0];
+      const who = (() => { try { return memberSession.get(req) || 'não identificado'; } catch { return 'não identificado'; } })();
+      notifyAdmin([
+        '*Erro do Mercado Pago em um pagamento* (não é recusa do cartão)',
+        '',
+        `*Cliente:* ${who}`,
+        `*Onde:* ${req?.path || '-'}${req?.body?.method === 'pix' ? ' (Pix)' : req?.body?.card ? ' (cartão)' : ''}`,
+        `*Erro:* ${String(err.message).slice(0, 500)}`,
+      ].join('\n')).catch((e) => console.error('Aviso de erro do Mercado Pago:', e.message));
       throw new ApiError(502, 'Não foi possível falar com o Mercado Pago. Tente de novo.');
     }
     throw err;
