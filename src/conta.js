@@ -351,24 +351,24 @@ function render(data) {
     $('#pay-btn').textContent = sub.first_charge ? `Pagar ${brl(sub.first_charge.cents)}`
       : !state.card_subscription && !cancelled ? (state.pix_enabled ? `Pagar ${fmtMonth(next.month)}` : `Pagar ${fmtMonth(next.month)} no cartão`)
       : sub.autopay_blocked && !next.current_paid ? `Pagar ${fmtMonth(next.month)} no cartão`
-      : failed ? 'Pagar com outro cartão'
+      : failed ? (state.card_enabled ? 'Pagar com outro cartão' : `Pagar ${fmtMonth(next.month)} por Pix`)
       : cancelled ? 'Reativar plano'
       : next.current_paid ? 'Ativar renovação automática'
       : state.pix_enabled ? `Pagar ${fmtMonth(next.month)}` : `Assinar com cartão de crédito`;
     $('#charge-info').textContent = cancelled
       ? 'Seu plano está cancelado. Você não será mais cobrado.'
       : scheduled ? 'Cancelamento agendado: nenhuma nova cobrança será feita.'
-      : failed ? `A cobrança automática no ${card} não foi aprovada. Pague com outro cartão para manter o acesso.`
+      : failed ? `A cobrança automática no ${card} não foi aprovada. ${state.card_enabled ? 'Pague com outro cartão' : 'Pague por Pix'} para manter o acesso.`
       : apOn ? (nextDate ? `Renovação automática: em ${nextDate} cobramos ${brl(sub.plan.price_cents)} no ${card}. Você não precisa fazer nada.` : 'Renovação automática ligada.')
       : next.current_paid
         ? (state.card_subscription ? 'Sua mensalidade deste mês está paga. Ative a renovação automática para não se preocupar com o vencimento.'
           : 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp.')
         : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
         : sub.first_charge ? firstChargeNote(sub).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
-        : active && notDueYet(sub) ? `Próxima mensalidade (${fmtMonth(next.month)}): ${brl(sub.plan.price_cents)}, vence em ${fmtDate(dueDateOf(next.month, sub.due_day))}. Você já pode pagar${state.pix_enabled ? ' com cartão de crédito ou Pix' : ' no cartão de crédito'}.`
+        : active && notDueYet(sub) ? `Próxima mensalidade (${fmtMonth(next.month)}): ${brl(sub.plan.price_cents)}, vence em ${fmtDate(dueDateOf(next.month, sub.due_day))}. Você já pode pagar${!state.card_enabled ? ' por Pix' : state.pix_enabled ? ' com cartão de crédito ou Pix' : ' no cartão de crédito'}.`
         : state.pix_enabled
           ? (state.card_subscription ? `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague com cartão de crédito (renovação automática todo mês) ou Pix.`
-            : `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague com cartão de crédito ou Pix. Todo mês você paga de novo (avisamos pelo WhatsApp antes do vencimento).`)
+            : `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague ${state.card_enabled ? 'com cartão de crédito ou Pix' : 'por Pix'}. Todo mês você paga de novo (avisamos pelo WhatsApp antes do vencimento).`)
           : state.card_subscription
             ? `Mensalidade de ${fmtMonth(next.month)} em aberto. O pagamento é no cartão de crédito, com renovação automática todo mês.`
             : `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague no cartão de crédito. Todo mês você paga de novo (avisamos pelo WhatsApp antes do vencimento).`;
@@ -543,12 +543,14 @@ function openPayment(mode = 'pay') {
   payMode = mode;
   const price = brl(sub.next_charge.amount_cents ?? sub.plan.price_cents);
   const first = firstChargeNote(sub);
-  $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : mode === 'once' ? (state.pix_enabled ? 'Pagamento da mensalidade' : 'Cartão de crédito · mensalidade') : 'Cartão de crédito · renovação automática'}`;
+  // cartão desligado para pagamentos novos: só Pix (a troca de cartão de quem já tem renovação automática continua)
+  const pixOnly = !state.card_enabled && state.pix_enabled && mode !== 'card';
+  $('#pay-eyebrow').innerHTML = pixOnly ? `${methodIcon('pix')} Pagamento por Pix` : `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : mode === 'once' ? (state.pix_enabled ? 'Pagamento da mensalidade' : 'Cartão de crédito · mensalidade') : 'Cartão de crédito · renovação automática'}`;
   $('#pay-plan').textContent = sub.seats > 1 ? `${sub.plan.name} · ${sub.seats} vagas` : sub.plan.name;
   $('#pay-amount').textContent = first ? `${price} agora` : `${price}/mês`;
   $('#pay-month').innerHTML = mode === 'card'
     ? 'As próximas cobranças automáticas serão feitas no novo cartão. <strong>Nada é cobrado agora.</strong>'
-    : first ? `${first}${state.card_subscription ? '' : ' Não é assinatura: nada é cobrado sozinho.'}`
+    : first ? `${first}${state.card_subscription ? '' : ' Nada é cobrado sozinho.'}`
     : mode === 'once'
       ? (state.card_subscription
         ? `Pague <strong>este mês (${price})</strong> no cartão de crédito, de forma avulsa (mensalidade de ${fmtMonth(sub.next_charge.month)}).
@@ -560,11 +562,18 @@ function openPayment(mode = 'pay') {
   cardNote = $('#pay-month').innerHTML;
   $('#card-error').classList.add('hidden');
   // Pix (mês a mês) como alternativa, menos na troca de cartão
-  $('#pay-tabs').classList.toggle('hidden', !(state.pix_enabled && mode !== 'card'));
+  $('#pay-tabs').classList.toggle('hidden', !(state.pix_enabled && state.card_enabled && mode !== 'card'));
+  $('#pay-lock-text').textContent = pixOnly ? 'Pagamento processado pelo Mercado Pago.' : 'Pagamento processado pelo Mercado Pago. Os dados do cartão não passam pelo nosso servidor.';
   $('#pix-error').classList.add('hidden');
   $('#pix-start').classList.remove('hidden');
   $('#pix-show').classList.add('hidden');
   stopPix();
+  if (pixOnly) {
+    unmountBrick();
+    payMethod('pix');
+    $('#pay-dlg').showModal();
+    return;
+  }
   payMethod('card');
   $('#pay-dlg').showModal();
   // assinar ou trocar cartão: primeiro os dados do titular; depois o formulário do cartão
@@ -676,7 +685,7 @@ function payMethod(method) {
   $('#pay-pix').classList.toggle('hidden', method !== 'pix');
   const sub = state.subscription;
   $('#pay-month').innerHTML = method === 'pix'
-    ? sub.first_charge ? `${firstChargeNote(sub)} O plano ativa assim que o Pix for confirmado.`
+    ? sub.first_charge ? `${firstChargeNote(sub)} O plano ativa assim que o Pix for confirmado (leva poucos segundos).`
     : `Pix de <strong>${brl(sub.plan.price_cents)}</strong> referente à mensalidade de ${fmtMonth(sub.next_charge.month)}.
        ${state.card_subscription ? 'Com Pix, <strong>você paga todo mês</strong> (avisamos pelo WhatsApp antes do vencimento). Prefere não se preocupar? Use o cartão com renovação automática.'
          : 'O plano ativa assim que o Pix for confirmado (leva poucos segundos).'}`
@@ -697,7 +706,7 @@ function stopChallenge() {
   challenge = null;
   $('#challenge-box').classList.add('hidden');
   $('#challenge-frame').removeAttribute('src');
-  $('#pay-tabs').classList.toggle('hidden', !(state?.pix_enabled && payMode !== 'card'));
+  $('#pay-tabs').classList.toggle('hidden', !(state?.pix_enabled && state?.card_enabled && payMode !== 'card'));
 }
 
 /** Consulta o resultado do pedido. final = true depois que o banco avisou que terminou (insiste por mais tempo). */

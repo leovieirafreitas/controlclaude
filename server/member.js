@@ -27,7 +27,10 @@ const TERMS_VERSION = '2026-11-15';
 export const PIX_ENABLED = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'on');
 // Cartão: por padrão o cliente paga o mês de forma avulsa (pedido normal no Mercado Pago, sem assinatura),
 // CARD_SUBSCRIPTION=off no .env: cartão avulso (um mês por vez). Padrão: assinatura com renovação automática (em teste desde 15/11/2026).
-export const CARD_SUBSCRIPTION = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on');
+// Cartão de crédito para pagamentos novos: DESLIGADO por padrão (o antifraude do Mercado Pago recusava tudo: o cliente paga por Pix).
+// Quem já tem renovação automática no cartão continua nela. CARD_ENABLED=on no .env volta a oferecer o cartão.
+export const CARD_ENABLED = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'off');
+export const CARD_SUBSCRIPTION = CARD_ENABLED && /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on');
 const CARD_ONCE_ENABLED = !CARD_SUBSCRIPTION;
 // Depois de uma renovação automática recusada, espera 7 dias antes de tentar de novo (tentativas seguidas pioram o antifraude)
 const AUTOPAY_RETRY_MS = 7 * 24 * 3600_000;
@@ -383,6 +386,7 @@ async function memberViewByEmail(email) {
     plans,
     can_pay: mpConfigured,
     pix_enabled: mpConfigured && PIX_ENABLED,
+    card_enabled: CARD_ENABLED,
     card_subscription: CARD_SUBSCRIPTION,
     mp_public_key: mpConfigured ? MP_PUBLIC_KEY : null,
   };
@@ -495,6 +499,7 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (req.body?.method === 'pix') {
     return { pix: await payWithPix({ ...sub, email: c.email }, chargePlan, charge.month), amount_cents: charge.cents };
   }
+  if (!CARD_ENABLED) throw new ApiError(400, 'O pagamento é por Pix. Abra o pagamento de novo e gere o código Pix.');
   const card = req.body?.card || {};
   if (!card.token || !card.payment_method_id) throw new ApiError(400, 'Dados do cartão incompletos.');
   if (card.payment_type_id && card.payment_type_id !== 'credit_card') {
@@ -572,6 +577,7 @@ memberApi.post('/pay/challenge', h(mpSafe(async (req) => {
  */
 memberApi.post('/autopay-link', h(mpSafe(async (req) => {
   if (!mpConfigured) throw new ApiError(503, 'Pagamento online indisponível no momento.');
+  if (!CARD_ENABLED) throw new ApiError(400, 'O pagamento é por Pix.');
   const c = await currentCustomer(req);
   const sub = await requireSubscription(c);
   const plan = pricedPlan(await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]), sub);
