@@ -86,7 +86,16 @@ function checkHolder(v) {
   if (name.split(' ').length < 2) throw new ApiError(400, 'Digite o nome completo do titular do cartão.');
   if (!validCpf(cpf)) throw new ApiError(400, 'CPF do titular inválido.');
   if (email.length > 160 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw new ApiError(400, 'E-mail do titular inválido.');
-  return { name, cpf, email, phone: oneLine(v.phone).slice(0, 30) };
+  return { name, cpf, email, phone: oneLine(v.phone).slice(0, 30), address: checkAddress(v.address) };
+}
+
+/** Endereço de cobrança do titular (opcional no servidor: telas antigas em cache não mandam). Não guardamos. */
+function checkAddress(a) {
+  if (!a || typeof a !== 'object') return null;
+  const zip = str(a.zip).replace(/\D/g, '');
+  const out = { zip, street: oneLine(a.street).slice(0, 120), number: oneLine(a.number).slice(0, 10), district: oneLine(a.district).slice(0, 80), city: oneLine(a.city).slice(0, 80), state: str(a.state).trim().toUpperCase() };
+  if (zip.length !== 8 || !out.street || !out.number || !out.city || !/^[A-Z]{2}$/.test(out.state)) throw new ApiError(400, 'Endereço do titular incompleto. Confira CEP, rua, número, cidade e estado.');
+  return out;
 }
 
 function checkNewPassword(pw) {

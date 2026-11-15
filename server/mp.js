@@ -145,6 +145,15 @@ async function saveCheckout(sub, month, order, amountCents) {
  * { token, payment_method_id, payment_type_id?, installments, payer: { email, identification } }
  * Retorna { status: 'approved' | 'pending' | 'rejected', message }
  */
+/** Endereço de cobrança do titular no formato da Orders API. */
+function payerAddress(a) {
+  if (!a?.zip) return {};
+  return { address: {
+    zip_code: a.zip, street_name: a.street, street_number: a.number,
+    ...(a.district ? { neighborhood: a.district } : {}), city: a.city, state: a.state,
+  } };
+}
+
 /** Nome e telefone do titular do cartão no formato da Orders API. */
 function payerExtra(holder) {
   if (!holder) return {};
@@ -201,7 +210,15 @@ export async function payWithCard(sub, plan, month, card, deviceId, holder, hist
   } : {};
   const info = CARD_3DS ? buyerHistory(history) : null;
   // tentativas, da mais completa para a mais simples: se o Mercado Pago não aceitar um campo novo (erro 400), cai para a seguinte
-  const bodies = [info ? { ...body, ...extras, additional_info: info } : null, CARD_3DS ? { ...body, ...extras } : null, body].filter(Boolean);
+  // endereço de cobrança do titular (recomendado pelo Mercado Pago); fica fora do pedido básico para não travar se for recusado
+  const addr = CARD_3DS && holder?.address ? payerAddress(holder.address) : null;
+  const withAddr = (b) => (addr ? { ...b, payer: { ...b.payer, ...addr } } : b);
+  const bodies = [
+    info ? withAddr({ ...body, ...extras, additional_info: info }) : null,
+    addr ? withAddr({ ...body, ...extras }) : null,
+    CARD_3DS ? { ...body, ...extras } : null,
+    body,
+  ].filter(Boolean);
   const rejection = async (err) => {
     // Recusa do cartão: a Orders API devolve erro HTTP com o pedido (e o motivo) no corpo.
     const failedPay = err.data?.data?.transactions?.payments?.[0];
