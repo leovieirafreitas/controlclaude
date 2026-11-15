@@ -276,6 +276,15 @@ $('#reset-form').addEventListener('submit', (e) => {
 
 let state = null;
 
+/** Data do vencimento num mês (AAAA-MM): o dia combinado ou o último dia do mês, se ele for mais curto. */
+function dueDateOf(month, dueDay) {
+  const [y, m] = month.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return `${month}-${String(Math.min(dueDay, last)).padStart(2, '0')}`;
+}
+/** A mensalidade em cobrança ainda não venceu? */
+const notDueYet = (sub) => dueDateOf(sub.next_charge.month, sub.due_day) >= new Date().toLocaleDateString('sv-SE');
+
 function renderPlanChoices(plans, currentId) {
   $('#mini-plans').innerHTML = plans.map((p) => `
     <div class="mini-plan ${p.featured ? 'featured' : ''}">
@@ -356,6 +365,7 @@ function render(data) {
           : 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp.')
         : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
         : sub.first_charge ? firstChargeNote(sub).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
+        : active && notDueYet(sub) ? `Próxima mensalidade (${fmtMonth(next.month)}): ${brl(sub.plan.price_cents)}, vence em ${fmtDate(dueDateOf(next.month, sub.due_day))}. Você já pode pagar${state.pix_enabled ? ' com cartão de crédito ou Pix' : ' no cartão de crédito'}.`
         : state.pix_enabled
           ? (state.card_subscription ? `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague com cartão de crédito (renovação automática todo mês) ou Pix.`
             : `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague com cartão de crédito ou Pix. Todo mês você paga de novo (avisamos pelo WhatsApp antes do vencimento).`)
