@@ -137,7 +137,19 @@ async function saveCheckout(sub, month, order, amountCents) {
  * { token, payment_method_id, payment_type_id?, installments, payer: { email, identification } }
  * Retorna { status: 'approved' | 'pending' | 'rejected', message }
  */
-export async function payWithCard(sub, plan, month, card, deviceId) {
+/** Nome e telefone do titular do cartão no formato da Orders API. */
+function payerExtra(holder) {
+  if (!holder) return {};
+  const [first, ...rest] = holder.name.split(' ');
+  const d = String(holder.phone || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  return {
+    first_name: first.slice(0, 60),
+    ...(rest.length ? { last_name: rest.join(' ').slice(0, 60) } : {}),
+    ...(d.length >= 10 ? { phone: { area_code: d.slice(0, 2), number: d.slice(2) } } : {}),
+  };
+}
+
+export async function payWithCard(sub, plan, month, card, deviceId, holder) {
   const type = card.payment_type_id || (String(card.payment_method_id).startsWith('deb') ? 'debit_card' : 'credit_card');
   const identification = card.payer?.identification?.number
     ? { type: card.payer.identification.type || 'CPF', number: String(card.payer.identification.number).replace(/\D/g, '') }
@@ -152,8 +164,9 @@ export async function payWithCard(sub, plan, month, card, deviceId) {
         processing_mode: 'automatic',
         total_amount: money(plan.price_cents),
         external_reference: extRef(sub.id, month),
-        description: `${plan.name} — mensalidade ${month.slice(5)}-${month.slice(0, 4)}`,
-        payer: { email: card.payer?.email || sub.email, ...(identification ? { identification } : {}) },
+        description: `Mensalidade Control Claude ${month.slice(5)}/${month.slice(0, 4)}`,
+        // dados do TITULAR do cartão (checkout): o antifraude compara com o cartão
+        payer: { email: card.payer?.email || sub.email, ...(identification ? { identification } : {}), ...payerExtra(holder) },
         transactions: {
           payments: [{
             amount: money(plan.price_cents),

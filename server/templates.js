@@ -7,6 +7,8 @@ const STORE_KEY = 'message_templates';
 const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 // Mesma chave do member.js / whatsapp.js: com o Pix desligado, os textos padrão não podem oferecer Pix
 const PIX_ON = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'off');
+// mesma chave do member.js: cartão com assinatura (renovação automática) ou avulso (padrão)
+const CARD_SUB = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'off');
 
 /** Variáveis disponíveis (nome → explicação e exemplo para a pré-visualização e o teste). */
 export const VARS = {
@@ -98,7 +100,8 @@ export const CATALOG = [
       'Olá, {nome}! 👋', '',
       'Sua mensalidade do *{plano}* ({valor}) vence em *{dias}*, no dia *{vencimento}*.', '',
       PIX_ON ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
-        : 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.', '',
+        : CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.'
+          : 'Para continuar, pague na sua área do assinante com *cartão de crédito*.', '',
       '👉 Pagar agora: {link}', '',
       'Se já pagou, desconsidere esta mensagem. 😉']) },
   { key: 'wa_lembrete_hoje', channel: 'whatsapp', group: 'Antes do vencimento', label: 'Vence hoje', hint: 'No dia do vencimento, se o lembrete ainda não tinha saído.',
@@ -106,7 +109,8 @@ export const CATALOG = [
       'Olá, {nome}! 👋', '',
       'Sua mensalidade do *{plano}* ({valor}) vence *hoje* ({vencimento}).', '',
       PIX_ON ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
-        : 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.', '',
+        : CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.'
+          : 'Para continuar, pague na sua área do assinante com *cartão de crédito*.', '',
       '👉 Pagar agora: {link}', '',
       'Se já pagou, desconsidere esta mensagem. 😉']) },
   { key: 'wa_atraso', channel: 'whatsapp', group: 'Antes do vencimento', label: 'Mensalidade atrasada', hint: 'No dia seguinte ao vencimento, se não pagou.',

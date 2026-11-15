@@ -19,13 +19,15 @@ const SOLD_OUT_MSG = 'Este plano está esgotado no momento. Escolha outro plano 
 
 export const memberApi = Router();
 // Versão dos Termos de uso / Política de privacidade (mude junto com a data nas páginas termos.html e privacidade.html)
-const TERMS_VERSION = '2026-11-11';
+const TERMS_VERSION = '2026-11-14';
 // O cliente paga só com cartão de crédito, em assinatura (renovação automática).
 // Pix pelo próprio cliente fica desligado; quem não conseguir pagar recebe um Pix gerado pelo admin no painel.
 // Para voltar a oferecer Pix na área do assinante: PIX_ENABLED=on no .env
 export const PIX_ENABLED = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'off');
-// Pagamento avulso (só este mês) no cartão pelo próprio cliente: desligado. Assinatura é o único caminho.
-const CARD_ONCE_ENABLED = false;
+// Cartão: por padrão o cliente paga o mês de forma avulsa (pedido normal no Mercado Pago, sem assinatura),
+// porque o antifraude recusava quase toda assinatura. Para voltar à assinatura: CARD_SUBSCRIPTION=on no .env
+export const CARD_SUBSCRIPTION = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'off');
+const CARD_ONCE_ENABLED = !CARD_SUBSCRIPTION;
 // Depois de uma renovação automática recusada, espera 7 dias antes de tentar de novo (tentativas seguidas pioram o antifraude)
 const AUTOPAY_RETRY_MS = 7 * 24 * 3600_000;
 export const memberSession = makeSession({ cookie: 'msid', maxAgeMs: 30 * 24 * 3600_000, sameSite: 'lax' });
@@ -317,7 +319,7 @@ async function memberViewByEmail(email) {
       next_charge: { month: next, current_paid: next !== month },
       // renovação automática no cartão (assinatura do Mercado Pago)
       // renovação automática recusada há menos de 7 dias: a tela vai direto para o pagamento avulso do mês
-      autopay_blocked: CARD_ONCE_ENABLED && Boolean(sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS
+      autopay_blocked: CARD_SUBSCRIPTION && Boolean(sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS
         && !(sub.mp_preapproval_id && sub.autopay_status === 'authorized')),
       autopay: sub.mp_preapproval_id && sub.autopay_status !== 'cancelled'
         ? { status: sub.autopay_status, card_last4: sub.card_last4, card_brand: sub.card_brand, next_charge_date: sub.next_charge_date }
@@ -331,6 +333,7 @@ async function memberViewByEmail(email) {
     plans,
     can_pay: mpConfigured,
     pix_enabled: mpConfigured && PIX_ENABLED,
+    card_subscription: CARD_SUBSCRIPTION,
     mp_public_key: mpConfigured ? MP_PUBLIC_KEY : null,
   };
 }
@@ -439,12 +442,12 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (req.body?.mode === 'once' && !CARD_ONCE_ENABLED) {
     throw new ApiError(400, 'O pagamento é por assinatura no cartão de crédito. Se não conseguir, fale com a gente no WhatsApp que ajudamos você.');
   }
-  const blocked = CARD_ONCE_ENABLED && sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
+  const blocked = !CARD_SUBSCRIPTION || sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
   if (req.body?.mode === 'once' || blocked) {
     if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
     const month = await billingMonth(sub, plan.price_cents);
-    const result = await payWithCard({ ...sub, email: c.email }, plan, month, card, deviceId);
-    if (result.status === 'rejected') notifyCardRejected(sub.id, { once: true, message: result.message });
+    const result = await payWithCard({ ...sub, email: c.email }, plan, month, card, deviceId, holder);
+    if (result.status === 'rejected') notifyCardRejected(sub.id, { once: true, message: result.message + (holder ? ` (titular: ${holder.name})` : '') });
     return { ...result, view: await memberView(c) };
   }
 
@@ -457,7 +460,7 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
     await run('UPDATE subscribers SET autopay_failed_at = NULL WHERE id = ?', [sub.id]);
   }
   // pagamento avulso (plano B) está desligado: não oferecer na tela
-  return { ...result, allow_once: CARD_ONCE_ENABLED && Boolean(result.allow_once), view: await memberView(c) };
+  return { ...result, allow_once: false, view: await memberView(c) };
 })));
 
 /**
