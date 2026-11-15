@@ -8,7 +8,8 @@ const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 // Mesma chave do member.js / whatsapp.js: com o Pix desligado, os textos padrão não podem oferecer Pix
 const PIX_ON = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'on');
 // mesma chave do member.js: cartão com assinatura (renovação automática) ou avulso (padrão)
-const CARD_SUB = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on');
+const CARD_ON = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'off'); // cartão para pagamentos novos (padrão: desligado, só Pix)
+const CARD_SUB = CARD_ON && /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on');
 
 /** Variáveis disponíveis (nome → explicação e exemplo para a pré-visualização e o teste). */
 export const VARS = {
@@ -25,7 +26,7 @@ export const VARS = {
   dias: { label: 'Dias até o vencimento', sample: '3 dias' },
   cartao: { label: 'Final do cartão', sample: 'final 1234' },
   acesso_ate: { label: 'Último dia de acesso', sample: '10/12/2026' },
-  formas_pagamento: { label: 'Formas de pagamento aceitas', sample: 'cartão de crédito ou Pix' },
+  formas_pagamento: { label: 'Formas de pagamento aceitas', sample: CARD_ON ? 'cartão de crédito ou Pix' : 'Pix' },
   link: { label: 'Link da área do assinante', sample: `${APP_URL || 'https://controlclaude.com.br'}/conta` },
 };
 
@@ -99,7 +100,8 @@ export const CATALOG = [
     on: true, vars: ['nome', 'plano', 'valor', 'dias', 'vencimento', 'formas_pagamento', 'link'], body: w([
       'Olá, {nome}! 👋', '',
       'Sua mensalidade do *{plano}* ({valor}) vence em *{dias}*, no dia *{vencimento}*.', '',
-      PIX_ON ? (CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
+      !CARD_ON ? 'Para continuar, pague por *Pix* na sua área do assinante. O plano segue ativo assim que o Pix é confirmado.'
+      : PIX_ON ? (CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
         : 'Para continuar, pague na sua área do assinante com *cartão de crédito* ou *Pix*.')
         : CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.'
           : 'Para continuar, pague na sua área do assinante com *cartão de crédito*.', '',
@@ -109,7 +111,8 @@ export const CATALOG = [
     on: true, vars: ['nome', 'plano', 'valor', 'vencimento', 'formas_pagamento', 'link'], body: w([
       'Olá, {nome}! 👋', '',
       'Sua mensalidade do *{plano}* ({valor}) vence *hoje* ({vencimento}).', '',
-      PIX_ON ? (CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
+      !CARD_ON ? 'Para continuar, pague por *Pix* na sua área do assinante. O plano segue ativo assim que o Pix é confirmado.'
+      : PIX_ON ? (CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
         : 'Para continuar, pague na sua área do assinante com *cartão de crédito* ou *Pix*.')
         : CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.'
           : 'Para continuar, pague na sua área do assinante com *cartão de crédito*.', '',
