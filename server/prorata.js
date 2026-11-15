@@ -1,22 +1,30 @@
 // Vencimento no mesmo dia para todos os clientes NOVOS, com o 1º pagamento proporcional (pro rata).
 //
-// Exemplo com vencimento no dia 28 e plano de R$ 200:
-//   assina dia 15 → paga 13 dias (R$ 86,67) e depois R$ 200 todo dia 28
-//   assina dia 25 → faltam 3 dias (7 ou menos): paga os 3 dias + o mês seguinte inteiro (R$ 220) e só volta a pagar no dia 28 do outro mês
-//   assina dia 30 → paga os dias até o dia 28 do mês seguinte (proporcional) e depois R$ 200 todo dia 28
-//   assina dia 28 → mês cheio, sem ajuste
+// Exemplo com vencimento no dia 30 (fevereiro: último dia) e plano de R$ 200:
+//   assina dia 15 → paga 15 dias (R$ 100,00) e depois R$ 200 todo dia 30
+//   assina dia 25 → faltam 5 dias (7 ou menos): paga os 5 dias + o mês seguinte inteiro (R$ 233,33) e só volta a pagar no dia 30 do outro mês
+//   assina dia 31 → paga os dias até o dia 30 do mês seguinte (proporcional) e depois R$ 200 todo dia 30
+//   assina dia 30 → mês cheio, sem ajuste
 //
-// Configuração (tabela settings): prorata_on = on|off (padrão: on) · prorata_day = 1..28 (padrão: 28)
+// Configuração (tabela settings): prorata_on = on|off (padrão: on) · prorata_day = 1..30 (padrão: 30; em mês mais curto, vale o último dia)
 import { get } from './db.js';
 
-export const PRORATA_DEFAULT_DAY = 28; // "final do mês": dia 28 existe em todos os meses
+export const PRORATA_DEFAULT_DAY = 30; // "final do mês": dia 30; em fevereiro, o último dia (28 ou 29)
+export const MAX_DUE_DAY = 30;
+
+/** Data do vencimento (AAAA-MM-DD) num mês: o dia combinado, ou o último dia do mês se ele for mais curto (fevereiro). */
+export function dueDate(month, dueDay) {
+  const [y, m] = String(month).split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${String(month).slice(0, 7)}-${String(Math.min(Number(dueDay) || 1, last)).padStart(2, '0')}`;
+}
 const MERGE_DAYS = 7; // faltando até 7 dias para o vencimento: cobra junto o mês seguinte
 
 export async function prorataConfig() {
   const rows = await Promise.all(['prorata_on', 'prorata_day'].map((k) => get('SELECT value FROM settings WHERE key = ?', [k])));
   const on = !/^(off|0|false|nao|não)$/i.test(String(rows[0]?.value || 'on').trim());
   const d = Number(rows[1]?.value);
-  return { on, day: Number.isInteger(d) && d >= 1 && d <= 28 ? d : PRORATA_DEFAULT_DAY };
+  return { on, day: Number.isInteger(d) && d >= 1 && d <= MAX_DUE_DAY ? d : PRORATA_DEFAULT_DAY };
 }
 
 const ym = (y, m) => { // m: 1..12, aceita estouro (13 = janeiro do ano seguinte)
@@ -35,9 +43,11 @@ const ym = (y, m) => { // m: 1..12, aceita estouro (13 = janeiro do ano seguinte
 export function firstCharge(todayISO, dueDay, monthlyCents) {
   const [y, m, d] = String(todayISO).slice(0, 10).split('-').map(Number);
   const monthly = Math.max(0, Math.round(Number(monthlyCents) || 0));
-  if (!y || !monthly || d === dueDay) return null;
-  const iso = (yy, mm) => `${ym(yy, mm)}-${String(dueDay).padStart(2, '0')}`;
-  const before = d < dueDay; // o vencimento deste mês ainda não chegou
+  if (!y || !monthly) return null;
+  const iso = (yy, mm) => dueDate(ym(yy, mm), dueDay); // em mês curto, cai no último dia
+  const dueThis = Number(iso(y, m).slice(8, 10));
+  if (d === dueThis) return null; // hoje é o vencimento: mês cheio
+  const before = d < dueThis; // o vencimento deste mês ainda não chegou
   const dueISO = before ? iso(y, m) : iso(y, m + 1);
   const days = Math.round((Date.parse(dueISO) - Date.UTC(y, m - 1, d)) / 86_400_000);
   const part = Math.round((monthly * Math.min(days, 30)) / 30);

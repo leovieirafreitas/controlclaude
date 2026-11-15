@@ -202,9 +202,9 @@
             <label>Vencimento no mesmo dia para clientes novos
               <select name="prorata_on"><option value="on">Ligado (1º pagamento proporcional)</option><option value="off">Desligado (vence no dia em que assinou)</option></select>
             </label>
-            <label>Dia do vencimento (1 a 28)<input name="prorata_day" type="number" min="1" max="28" step="1" placeholder="28"></label>
+            <label>Dia do vencimento (1 a 30)<input name="prorata_day" type="number" min="1" max="30" step="1" placeholder="30"></label>
           </div>
-          <p class="muted small">Cliente novo paga só os dias até o próximo vencimento e depois o valor cheio todo mês nesse dia. Faltando 7 dias ou menos, paga junto o mês seguinte. Quem já assina não muda.</p>
+          <p class="muted small">Em fevereiro, o dia 29 ou 30 vira o último dia do mês. Cliente novo paga só os dias até o próximo vencimento e depois o valor cheio todo mês nesse dia. Faltando 7 dias ou menos, paga junto o mês seguinte. Quem já assina não muda.</p>
           <label>Título principal<input name="headline" placeholder="Escolha seu plano e comece hoje."></label>
           <label>Subtítulo<input name="subheadline" placeholder="Cadastro em menos de um minuto. Você paga por Pix e fala direto com a gente pelo WhatsApp."></label>
         </form>
@@ -325,7 +325,7 @@
       <p class="muted small sub-monthly-hint" id="sub-monthly-hint">Fica travado para este assinante: mudar o preço do plano não altera quem já assina.</p>
       <div class="row2">
         <label>Início *<input name="start_date" type="date" required></label>
-        <label>Dia de vencimento *<input name="due_day" type="number" min="1" max="28" value="10" required></label>
+        <label>Dia de vencimento *<input name="due_day" type="number" min="1" max="30" value="10" required></label>
       </div>
       <label>Status
         <select name="status">

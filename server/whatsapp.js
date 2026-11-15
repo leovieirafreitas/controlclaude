@@ -1,5 +1,6 @@
 // Avisos no WhatsApp pela Evolution API (v2): para o admin e para o cliente.
 // Nunca bloqueia nem derruba o fluxo principal: se o envio falhar, só registra no log.
+import { dueDate } from './prorata.js';
 import { all, get, run } from './db.js';
 import { setAutopayStatus } from './mp.js';
 import { firePush } from './push.js';
@@ -450,7 +451,7 @@ export async function runDailyNotices() {
       if (paid >= s.price_cents) continue;                       // já pago
       // meses já cobertos pelo 1º pagamento: com pro rata vale o mês que ele quitou; sem, o mês da adesão
       if (s.first_month ? s.first_month >= month : String(s.start_date).slice(0, 7) >= month) continue;
-      const dueISO = `${month}-${String(s.due_day).padStart(2, '0')}`;
+      const dueISO = dueDate(month, s.due_day); // dia 30 em fevereiro: último dia do mês
       const daysLeft = daysBetween(today, dueISO);
       const due = fmtDate(dueISO);
       await noticesFor(s, month, daysLeft, due);
