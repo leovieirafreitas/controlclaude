@@ -13,7 +13,7 @@ export const api = Router();
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const STATUSES = ['aguardando', 'ativo', 'pausado', 'cancelado'];
-export const SETTING_KEYS = ['brand_name', 'headline', 'subheadline', 'pix_key', 'whatsapp'];
+export const SETTING_KEYS = ['brand_name', 'headline', 'subheadline', 'pix_key', 'whatsapp', 'prorata_on', 'prorata_day'];
 
 export class ApiError extends Error {
   constructor(status, message) {
@@ -222,8 +222,10 @@ api.post('/subscribers/:id/pix', h(async ({ params }) => {
   const plan = planRow && { ...planRow, price_cents: sub.monthly_cents ?? planRow.price_cents }; // valor travado do assinante
   if (!plan || plan.price_cents <= 0) throw new ApiError(400, 'Este assinante não tem valor de mensalidade para cobrar.');
   if (!sub.email) throw new ApiError(400, 'Cadastre o e-mail deste assinante (Editar) para gerar o Pix: o Mercado Pago exige.');
-  const { billingMonth } = await import('./member.js');
-  const month = await billingMonth(sub, plan.price_cents);
+  const { chargeFor } = await import('./member.js');
+  const charge = await chargeFor(sub, plan.price_cents); // 1º pagamento de cliente novo: proporcional
+  const month = charge.month;
+  plan.price_cents = charge.cents;
   let pix;
   try {
     pix = await payWithPix(sub, plan, month);
@@ -368,13 +370,14 @@ api.get('/dashboard', h(async ({ query }) => {
   // Todas as consultas do painel em paralelo (cada ida ao banco custa ~180 ms)
   const [subs, totals, byMethod, byPlan] = await Promise.all([all(`
     SELECT s.id, s.name, s.email, s.phone, s.due_day, s.status, s.start_date, s.cancel_at, s.retention_answer,
-           p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
+           p.name AS plan_name,
+           CASE WHEN s.first_month = ? AND s.first_cents IS NOT NULL THEN s.first_cents ELSE COALESCE(s.monthly_cents, p.price_cents) END AS price_cents,
            COALESCE((SELECT SUM(amount_cents) FROM payments WHERE subscriber_id = s.id AND ref_month = ?), 0) AS paid_cents,
            (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS last_paid_at,
            (SELECT string_agg(DISTINCT method, ',') FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_methods
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
-    WHERE s.status = 'ativo' AND to_char(s.start_date, 'YYYY-MM') <= ?
-    ORDER BY lower(s.name)`, [month, month, month, month]),
+    WHERE s.status = 'ativo' AND to_char(s.start_date, 'YYYY-MM') <= ? AND (s.first_month IS NULL OR s.first_month <= ?)
+    ORDER BY lower(s.name)`, [month, month, month, month, month, month]),
     all(`
       SELECT ref_month, COALESCE(SUM(amount_cents), 0) AS total FROM payments
       WHERE ref_month = ANY(?) GROUP BY ref_month`, [[...new Set([...months, month])]]),

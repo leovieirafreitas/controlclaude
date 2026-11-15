@@ -339,7 +339,8 @@ function render(data) {
     const showPay = can_pay && !scheduled && !sub.plan.sold_out && (!apOn || failed);
     $('#pay-btn').classList.toggle('hidden', !showPay);
     $('#check-btn').classList.toggle('hidden', !can_pay || scheduled || (active && next.current_paid));
-    $('#pay-btn').textContent = !state.card_subscription && !cancelled ? (state.pix_enabled ? `Pagar ${fmtMonth(next.month)}` : `Pagar ${fmtMonth(next.month)} no cartão`)
+    $('#pay-btn').textContent = sub.first_charge ? `Pagar ${brl(sub.first_charge.cents)}`
+      : !state.card_subscription && !cancelled ? (state.pix_enabled ? `Pagar ${fmtMonth(next.month)}` : `Pagar ${fmtMonth(next.month)} no cartão`)
       : sub.autopay_blocked && !next.current_paid ? `Pagar ${fmtMonth(next.month)} no cartão`
       : failed ? 'Pagar com outro cartão'
       : cancelled ? 'Reativar plano'
@@ -354,6 +355,7 @@ function render(data) {
         ? (state.card_subscription ? 'Sua mensalidade deste mês está paga. Ative a renovação automática para não se preocupar com o vencimento.'
           : 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp.')
         : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
+        : sub.first_charge ? firstChargeNote(sub).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
         : state.pix_enabled
           ? (state.card_subscription ? `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague com cartão de crédito (renovação automática todo mês) ou Pix.`
             : `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague com cartão de crédito ou Pix. Todo mês você paga de novo (avisamos pelo WhatsApp antes do vencimento).`)
@@ -395,7 +397,7 @@ async function choosePlan(planId) {
     flash(view.manual.pix_key ? `Plano escolhido! Pague via Pix na chave ${view.manual.pix_key}.` : 'Plano escolhido! Entraremos em contato para o pagamento.', 'ok');
     return;
   }
-  openPayment(state.card_subscription ? 'pay' : 'once');
+  openPayment(cardMode());
 }
 
 /** Pergunta quantas vagas (1 até o máximo do plano). Devolve o número ou null se fechar. */
@@ -441,7 +443,7 @@ async function mountBrick() {
   brickController = await mpInstance.bricks().create('cardPayment', 'cardPaymentBrick_container', {
     // e-mail e CPF do TITULAR do cartão (passo anterior): o antifraude compara com os dados do cartão
     initialization: {
-      amount: sub.plan.price_cents / 100,
+      amount: (sub.next_charge.amount_cents ?? sub.plan.price_cents) / 100,
       payer: {
         email: holder?.email || state.customer.email,
         ...(holder?.cpf ? { identification: { type: 'CPF', number: holder.cpf } } : {}),
@@ -509,16 +511,34 @@ async function mountBrick() {
   });
 }
 
+/** Texto do 1º pagamento proporcional (cliente novo com vencimento fixo). Vazio se não se aplica. */
+function firstChargeNote(sub) {
+  const f = sub.first_charge;
+  if (!f) return '';
+  const monthly = brl(sub.plan.price_cents);
+  const dias = `${f.days} dia${f.days > 1 ? 's' : ''}`;
+  const due = `dia ${sub.due_day}`;
+  return f.merged
+    ? `<strong>Primeiro pagamento: ${brl(f.cents)}</strong> = ${dias} até o ${due} (${brl(f.part_cents)}) + a mensalidade seguinte (${monthly}).
+       Depois, <strong>${monthly} todo ${due}</strong>, a partir de ${fmtDate(f.next_due)}.`
+    : `<strong>Primeiro pagamento proporcional: ${brl(f.cents)}</strong> (${dias}, até o ${due}).
+       Depois, <strong>${monthly} todo ${due}</strong>, a partir de ${fmtDate(f.next_due)}.`;
+}
+/** Modo do pagamento no cartão: assinatura só quando ligada e não for o 1º pagamento proporcional. */
+const cardMode = () => (state.card_subscription && !state.subscription?.first_charge ? 'pay' : 'once');
+
 function openPayment(mode = 'pay') {
   const sub = state.subscription;
   if (!sub || !state.can_pay) return;
   payMode = mode;
-  const price = brl(sub.plan.price_cents);
+  const price = brl(sub.next_charge.amount_cents ?? sub.plan.price_cents);
+  const first = firstChargeNote(sub);
   $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : mode === 'once' ? (state.pix_enabled ? 'Pagamento da mensalidade' : 'Cartão de crédito · mensalidade') : 'Cartão de crédito · renovação automática'}`;
   $('#pay-plan').textContent = sub.seats > 1 ? `${sub.plan.name} · ${sub.seats} vagas` : sub.plan.name;
-  $('#pay-amount').textContent = `${price}/mês`;
+  $('#pay-amount').textContent = first ? `${price} agora` : `${price}/mês`;
   $('#pay-month').innerHTML = mode === 'card'
     ? 'As próximas cobranças automáticas serão feitas no novo cartão. <strong>Nada é cobrado agora.</strong>'
+    : first ? `${first}${state.card_subscription ? '' : ' Não é assinatura: nada é cobrado sozinho.'}`
     : mode === 'once'
       ? (state.card_subscription
         ? `Pague <strong>este mês (${price})</strong> no cartão de crédito, de forma avulsa (mensalidade de ${fmtMonth(sub.next_charge.month)}).
@@ -646,7 +666,8 @@ function payMethod(method) {
   $('#pay-pix').classList.toggle('hidden', method !== 'pix');
   const sub = state.subscription;
   $('#pay-month').innerHTML = method === 'pix'
-    ? `Pix de <strong>${brl(sub.plan.price_cents)}</strong> referente à mensalidade de ${fmtMonth(sub.next_charge.month)}.
+    ? sub.first_charge ? `${firstChargeNote(sub)} O plano ativa assim que o Pix for confirmado.`
+    : `Pix de <strong>${brl(sub.plan.price_cents)}</strong> referente à mensalidade de ${fmtMonth(sub.next_charge.month)}.
        ${state.card_subscription ? 'Com Pix, <strong>você paga todo mês</strong> (avisamos pelo WhatsApp antes do vencimento). Prefere não se preocupar? Use o cartão com renovação automática.'
          : 'O plano ativa assim que o Pix for confirmado (leva poucos segundos).'}`
     : cardNote;
@@ -801,7 +822,7 @@ $('#mini-plans').addEventListener('click', async (e) => {
 });
 
 // sem assinatura (padrão): o botão paga só a mensalidade em aberto
-$('#pay-btn').addEventListener('click', () => openPayment(state.card_subscription ? 'pay' : 'once'));
+$('#pay-btn').addEventListener('click', () => openPayment(cardMode()));
 $('#card-btn').addEventListener('click', () => openPayment('card'));
 
 $('#change-btn').addEventListener('click', () => {

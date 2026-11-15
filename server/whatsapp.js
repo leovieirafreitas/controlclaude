@@ -435,7 +435,7 @@ export async function runDailyNotices() {
   const nextMonth = addMonths(thisMonth, 1);
 
   const subs = await all(`
-    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.start_date, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
+    SELECT s.id, s.name, s.email, s.phone, s.due_day, s.start_date, s.first_month, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            s.autopay_status, s.card_last4,
            (SELECT MAX(ref_month) FROM payments WHERE subscriber_id = s.id) AS last_paid_month,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this,
@@ -449,6 +449,7 @@ export async function runDailyNotices() {
     for (const [month, paid] of [[thisMonth, s.paid_this], [nextMonth, s.paid_next]]) {
       if (paid >= s.price_cents) continue;                       // já pago
       if (String(s.start_date).slice(0, 7) >= month) continue;  // mês da adesão: coberto pelo 1º pagamento
+      if (s.first_month && s.first_month >= month) continue;     // pro rata: o 1º pagamento quitou até este mês
       const dueISO = `${month}-${String(s.due_day).padStart(2, '0')}`;
       const daysLeft = daysBetween(today, dueISO);
       const due = fmtDate(dueISO);

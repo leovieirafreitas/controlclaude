@@ -77,10 +77,12 @@ function firstPayment(order) {
  */
 export async function activateIfPaid(subId, month, paidNowCents) {
   const s = await get(`
-    SELECT s.id, s.status, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
+    SELECT s.id, s.status, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, s.first_month, s.first_cents,
            (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid
     FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [month, subId]);
   if (!s) return false;
+  // 1º pagamento proporcional (cliente novo com vencimento fixo): o valor devido neste mês é o proporcional
+  if (s.first_month === month && s.first_cents != null) s.price_cents = s.first_cents;
   if (Number(s.paid) >= Number(s.price_cents)) {
     if (s.status !== 'ativo') {
       await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [s.id]);
