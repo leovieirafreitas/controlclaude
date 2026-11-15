@@ -226,13 +226,18 @@
       <p class="eyebrow" id="pay-eyebrow">Pagamento</p>
       <div class="summary"><strong id="pay-plan"></strong><span id="pay-amount"></span></div>
       <div class="tabs hidden" id="pay-tabs" role="tablist">
-        <button type="button" data-method="card" class="active"><span class="pm-slot" data-icon="credito"></span>Cartão de crédito</button>
-        <button type="button" data-method="pix"><span class="pm-slot" data-icon="pix"></span>Pix</button>
+        <button type="button" data-method="pix" class="active"><span class="pm-slot" data-icon="pix"></span>Pix</button>
+        <button type="button" data-method="card"><span class="pm-slot" data-icon="credito"></span>Cartão de crédito</button>
       </div>
 
       <p class="autopay-note" id="pay-month"></p>
 
       <div id="pay-card">
+        <!-- no cartão o cliente escolhe: pagar só este mês (avulso) ou ativar a renovação automática (assinatura) -->
+        <div id="card-mode" class="card-mode hidden" role="radiogroup" aria-label="Como pagar no cartão">
+          <button type="button" role="radio" data-mode="once" class="active" aria-checked="true"><strong>Só este mês</strong><span>Paga uma vez. No próximo mês você paga de novo.</span></button>
+          <button type="button" role="radio" data-mode="pay" aria-checked="false"><strong>Renovação automática</strong><span>Cobra sozinho todo mês no cartão. Cancele quando quiser.</span></button>
+        </div>
         <!-- passo 1: dados do TITULAR do cartão (o antifraude compara com o cartão) -->
         <form id="holder-box" class="holder-box hidden" novalidate>
           <p class="holder-title">Dados do titular do cartão</p>

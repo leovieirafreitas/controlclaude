@@ -8,7 +8,7 @@ const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 // Mesma chave do member.js / whatsapp.js: com o Pix desligado, os textos padrão não podem oferecer Pix
 const PIX_ON = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'on');
 // mesma chave do member.js: cartão com assinatura (renovação automática) ou avulso (padrão)
-const CARD_ON = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'off'); // cartão para pagamentos novos (padrão: desligado, só Pix)
+const CARD_ON = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'on'); // cartão para pagamentos novos
 const CARD_SUB = CARD_ON && /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on');
 
 /** Variáveis disponíveis (nome → explicação e exemplo para a pré-visualização e o teste). */
@@ -101,7 +101,7 @@ export const CATALOG = [
       'Olá, {nome}! 👋', '',
       'Sua mensalidade do *{plano}* ({valor}) vence em *{dias}*, no dia *{vencimento}*.', '',
       !CARD_ON ? 'Para continuar, pague por *Pix* na sua área do assinante. O plano segue ativo assim que o Pix é confirmado.'
-      : PIX_ON ? (CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
+      : PIX_ON ? (CARD_SUB ? 'Para continuar, pague na sua área do assinante por *Pix* ou *cartão de crédito*. No cartão, você pode ativar a *renovação automática* e não se preocupar mais com o vencimento.'
         : 'Para continuar, pague na sua área do assinante com *cartão de crédito* ou *Pix*.')
         : CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.'
           : 'Para continuar, pague na sua área do assinante com *cartão de crédito*.', '',
@@ -112,7 +112,7 @@ export const CATALOG = [
       'Olá, {nome}! 👋', '',
       'Sua mensalidade do *{plano}* ({valor}) vence *hoje* ({vencimento}).', '',
       !CARD_ON ? 'Para continuar, pague por *Pix* na sua área do assinante. O plano segue ativo assim que o Pix é confirmado.'
-      : PIX_ON ? (CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito* (ativa a *renovação automática* e você não precisa mais se preocupar com o vencimento) ou por *Pix*.'
+      : PIX_ON ? (CARD_SUB ? 'Para continuar, pague na sua área do assinante por *Pix* ou *cartão de crédito*. No cartão, você pode ativar a *renovação automática* e não se preocupar mais com o vencimento.'
         : 'Para continuar, pague na sua área do assinante com *cartão de crédito* ou *Pix*.')
         : CARD_SUB ? 'Para continuar, pague na sua área do assinante com *cartão de crédito*. Assim você ativa a *renovação automática* e não precisa mais se preocupar com o vencimento.'
           : 'Para continuar, pague na sua área do assinante com *cartão de crédito*.', '',

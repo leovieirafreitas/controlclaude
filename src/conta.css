@@ -201,3 +201,12 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 .challenge-box { display: grid; gap: 10px; }
 .challenge-box .fine { text-align: left; margin: 0; }
 #challenge-frame { width: 100%; height: 460px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+
+/* cartão: só este mês ou renovação automática */
+.card-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 14px; }
+.card-mode button { font: inherit; text-align: left; display: grid; gap: 4px; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+.card-mode button strong { font-size: 14px; }
+.card-mode button span { font-size: 12px; line-height: 1.35; color: var(--muted); }
+.card-mode button.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.card-mode button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 420px) { .card-mode { grid-template-columns: 1fr; } }

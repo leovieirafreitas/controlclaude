@@ -349,25 +349,22 @@ function render(data) {
     $('#pay-btn').classList.toggle('hidden', !showPay);
     $('#check-btn').classList.toggle('hidden', !can_pay || scheduled || (active && next.current_paid));
     $('#pay-btn').textContent = sub.first_charge ? `Pagar ${brl(sub.first_charge.cents)}`
-      : !state.card_subscription && !cancelled ? (state.pix_enabled ? `Pagar ${fmtMonth(next.month)}` : `Pagar ${fmtMonth(next.month)} no cartão`)
-      : sub.autopay_blocked && !next.current_paid ? `Pagar ${fmtMonth(next.month)} no cartão`
-      : failed ? (state.card_enabled ? 'Pagar com outro cartão' : `Pagar ${fmtMonth(next.month)} por Pix`)
+      : failed ? (state.card_enabled ? 'Pagar com outro cartão ou Pix' : `Pagar ${fmtMonth(next.month)} por Pix`)
       : cancelled ? 'Reativar plano'
-      : next.current_paid ? 'Ativar renovação automática'
-      : state.pix_enabled ? `Pagar ${fmtMonth(next.month)}` : `Assinar com cartão de crédito`;
+      : `Pagar ${fmtMonth(next.month)}`;
     $('#charge-info').textContent = cancelled
       ? 'Seu plano está cancelado. Você não será mais cobrado.'
       : scheduled ? 'Cancelamento agendado: nenhuma nova cobrança será feita.'
       : failed ? `A cobrança automática no ${card} não foi aprovada. ${state.card_enabled ? 'Pague com outro cartão' : 'Pague por Pix'} para manter o acesso.`
       : apOn ? (nextDate ? `Renovação automática: em ${nextDate} cobramos ${brl(sub.plan.price_cents)} no ${card}. Você não precisa fazer nada.` : 'Renovação automática ligada.')
       : next.current_paid
-        ? (state.card_subscription ? 'Sua mensalidade deste mês está paga. Ative a renovação automática para não se preocupar com o vencimento.'
+        ? (state.card_subscription ? 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp. Se quiser, ative a renovação automática no cartão ao pagar a próxima.'
           : 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp.')
         : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
         : sub.first_charge ? firstChargeNote(sub).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
         : active && notDueYet(sub) ? `Próxima mensalidade (${fmtMonth(next.month)}): ${brl(sub.plan.price_cents)}, vence em ${fmtDate(dueDateOf(next.month, sub.due_day))}. Você já pode pagar${!state.card_enabled ? ' por Pix' : state.pix_enabled ? ' com cartão de crédito ou Pix' : ' no cartão de crédito'}.`
         : state.pix_enabled
-          ? (state.card_subscription ? `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague com cartão de crédito (renovação automática todo mês) ou Pix.`
+          ? (state.card_subscription ? `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague por Pix ou cartão de crédito (no cartão, só este mês ou com renovação automática).`
             : `Mensalidade de ${fmtMonth(next.month)} em aberto. Pague ${state.card_enabled ? 'com cartão de crédito ou Pix' : 'por Pix'}. Todo mês você paga de novo (avisamos pelo WhatsApp antes do vencimento).`)
           : state.card_subscription
             ? `Mensalidade de ${fmtMonth(next.month)} em aberto. O pagamento é no cartão de crédito, com renovação automática todo mês.`
@@ -535,49 +532,70 @@ function firstChargeNote(sub) {
        Depois, <strong>${monthly} todo ${due}</strong>, a partir de ${fmtDate(f.next_due)}.`;
 }
 /** Modo do pagamento no cartão: assinatura só quando ligada e não for o 1º pagamento proporcional. */
-const cardMode = () => (state.card_subscription && !state.subscription?.first_charge ? 'pay' : 'once');
+const cardMode = () => 'once'; // ao abrir, o cartão começa no avulso; o cliente pode trocar para a renovação automática
+/** A renovação automática pode ser escolhida agora? (o 1º pagamento proporcional é sempre avulso) */
+const canAutopay = () => Boolean(state.card_subscription && !state.subscription?.first_charge);
 
-function openPayment(mode = 'pay') {
+/** Texto explicando o que acontece no cartão, conforme o modo. */
+function cardNoteFor(mode) {
+  const sub = state.subscription;
+  const price = brl(sub.next_charge.amount_cents ?? sub.plan.price_cents);
+  const first = firstChargeNote(sub);
+  if (mode === 'card') return 'As próximas cobranças automáticas serão feitas no novo cartão. <strong>Nada é cobrado agora.</strong>';
+  if (first) return `${first} Nada é cobrado sozinho.`;
+  if (mode === 'once') {
+    return `Pagamento da mensalidade de <strong>${fmtMonth(sub.next_charge.month)} (${price})</strong> no cartão de crédito, <strong>só este mês</strong>.
+      Nada é cobrado sozinho depois: no próximo mês avisamos você pelo WhatsApp para pagar de novo.`;
+  }
+  return `Cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, no mesmo cartão.
+    Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do período pago, sem estorno.`;
+}
+
+/** Troca entre cartão avulso ('once') e renovação automática ('pay'). */
+function setCardMode(mode) {
+  payMode = mode;
+  document.querySelectorAll('#card-mode button').forEach((b) => {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  cardNote = cardNoteFor(mode);
+  $('#mp-link-alt').classList.toggle('hidden', mode !== 'pay');
+  if (!$('#pay-card').classList.contains('hidden')) $('#pay-month').innerHTML = cardNote;
+}
+document.querySelectorAll('#card-mode button').forEach((b) => b.addEventListener('click', () => setCardMode(b.dataset.mode)));
+
+function openPayment(mode = 'once') {
   const sub = state.subscription;
   if (!sub || !state.can_pay) return;
-  payMode = mode;
   const price = brl(sub.next_charge.amount_cents ?? sub.plan.price_cents);
   const first = firstChargeNote(sub);
   // cartão desligado para pagamentos novos: só Pix (a troca de cartão de quem já tem renovação automática continua)
   const pixOnly = !state.card_enabled && state.pix_enabled && mode !== 'card';
-  $('#pay-eyebrow').innerHTML = pixOnly ? `${methodIcon('pix')} Pagamento por Pix` : `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : mode === 'once' ? (state.pix_enabled ? 'Pagamento da mensalidade' : 'Cartão de crédito · mensalidade') : 'Cartão de crédito · renovação automática'}`;
+  $('#pay-eyebrow').innerHTML = mode === 'card' ? `${methodIcon('credito')} Trocar cartão`
+    : pixOnly ? `${methodIcon('pix')} Pagamento por Pix` : `${methodIcon(state.pix_enabled ? 'pix' : 'credito')} Pagamento da mensalidade`;
   $('#pay-plan').textContent = sub.seats > 1 ? `${sub.plan.name} · ${sub.seats} vagas` : sub.plan.name;
   $('#pay-amount').textContent = first ? `${price} agora` : `${price}/mês`;
-  $('#pay-month').innerHTML = mode === 'card'
-    ? 'As próximas cobranças automáticas serão feitas no novo cartão. <strong>Nada é cobrado agora.</strong>'
-    : first ? `${first}${state.card_subscription ? '' : ' Nada é cobrado sozinho.'}`
-    : mode === 'once'
-      ? (state.card_subscription
-        ? `Pague <strong>este mês (${price})</strong> no cartão de crédito, de forma avulsa (mensalidade de ${fmtMonth(sub.next_charge.month)}).
-           No próximo vencimento, tentamos ativar a renovação automática outra vez.`
-        : `Pagamento da mensalidade de <strong>${fmtMonth(sub.next_charge.month)} (${price})</strong> no cartão de crédito.
-           <strong>Não é assinatura:</strong> nada é cobrado sozinho depois. No próximo mês avisamos você pelo WhatsApp para pagar de novo.`)
-    : `Cobramos <strong>${price} agora</strong> (mensalidade de ${fmtMonth(sub.next_charge.month)}) e depois <strong>todo mês, automaticamente</strong>, no mesmo cartão.
-       Você pode cancelar quando quiser: a cobrança para e o acesso continua até o fim do período pago, sem estorno.`;
-  cardNote = $('#pay-month').innerHTML;
+  // no cartão o cliente escolhe: só este mês ou renovação automática (menos na troca de cartão e no 1º pagamento proporcional)
+  $('#card-mode').classList.toggle('hidden', !(mode !== 'card' && canAutopay() && state.card_once));
   $('#card-error').classList.add('hidden');
-  // Pix (mês a mês) como alternativa, menos na troca de cartão
   $('#pay-tabs').classList.toggle('hidden', !(state.pix_enabled && state.card_enabled && mode !== 'card'));
   $('#pay-lock-text').textContent = pixOnly ? 'Pagamento processado pelo Mercado Pago.' : 'Pagamento processado pelo Mercado Pago. Os dados do cartão não passam pelo nosso servidor.';
   $('#pix-error').classList.add('hidden');
   $('#pix-start').classList.remove('hidden');
   $('#pix-show').classList.add('hidden');
   stopPix();
+  setCardMode(mode === 'card' ? 'card' : canAutopay() && !state.card_once ? 'pay' : mode === 'pay' && canAutopay() ? 'pay' : 'once');
   if (pixOnly) {
     unmountBrick();
     payMethod('pix');
     $('#pay-dlg').showModal();
     return;
   }
-  payMethod('card');
+  // abre no Pix (aprova na hora); o cartão fica na outra aba, começando pelos dados do titular
   $('#pay-dlg').showModal();
-  // assinar ou trocar cartão: primeiro os dados do titular; depois o formulário do cartão
   showHolderForm();
+  payMethod(mode !== 'card' && state.pix_enabled ? 'pix' : 'card');
 }
 
 // ------------------------------------------------------------------ passo 1: dados do titular do cartão
