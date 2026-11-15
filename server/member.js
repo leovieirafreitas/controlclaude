@@ -436,7 +436,9 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (card.payment_type_id && card.payment_type_id !== 'credit_card') {
     throw new ApiError(400, 'A renovação automática funciona só com cartão de crédito.');
   }
-  const deviceId = str(req.body?.device_id).slice(0, 200) || undefined;
+  // o identificador do Mercado Pago tem mais de 200 caracteres: cortar estraga e o antifraude fica sem o aparelho
+  const rawDevice = str(req.body?.device_id);
+  const deviceId = rawDevice && rawDevice.length <= 2000 && /^[\x21-\x7E]+$/.test(rawDevice) ? rawDevice : undefined;
   const holder = checkHolder(req.body?.holder);
   if (holder) {
     // o e-mail do titular vira o e-mail do pagador; o CPF digitado no cartão (token) prevalece se vier
