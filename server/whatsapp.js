@@ -92,7 +92,8 @@ const fire = (p) => { Promise.resolve(p).catch(() => {}); };
 
 async function subscriberInfo(subscriberId) {
   return get(`
-    SELECT s.id, s.name, s.email, s.phone, s.birth_date, s.due_day, s.start_date, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
+    SELECT s.id, s.name, s.email, s.phone, s.birth_date, s.due_day, s.start_date,
+           p.name || CASE WHEN s.seats > 1 THEN ' (' || s.seats || ' vagas)' ELSE '' END AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
            s.card_last4, s.next_charge_date,
            (SELECT COUNT(*) FROM payments WHERE subscriber_id = s.id) AS payments_count
     FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [subscriberId]);
@@ -238,11 +239,16 @@ export async function notifyUnderpaid({ subscriberId, month, paidCents, lastCent
  * Resultado da criação do e-mail institucional (Google Workspace) do assinante.
  * Vai só para o admin: e-mail + senha temporária para repassar ao cliente.
  */
-export async function notifyWorkspace({ ok, subscriberId, email, password, error, group }) {
+export async function notifyWorkspace({ ok, subscriberId, email, password, error, group, accounts }) {
   const s = await subscriberInfo(subscriberId).catch(() => null);
   if (!s) return;
+  const list = accounts?.length ? accounts : email ? [{ email, password }] : [];
+  // várias vagas: uma linha por conta
+  const accountLines = list.length > 1
+    ? [`*${list.length} contas (uma por vaga):*`, ...list.map((a) => `${a.email}  |  senha: ${a.password}`)]
+    : list.length ? [`*E-mail:* ${list[0].email}`, `*Senha temporária:* ${list[0].password}`] : [];
   firePush(ok
-    ? { title: 'E-mail do membro criado', body: `${email}\n${s.plan_name}`, tag: `workspace-${s.id}`, url: '/admin#subscribers' }
+    ? { title: list.length > 1 ? `${list.length} e-mails do membro criados` : 'E-mail do membro criado', body: `${list.map((a) => a.email).join(', ')}\n${s.plan_name}`, tag: `workspace-${s.id}`, url: '/admin#subscribers' }
     : { title: 'Não foi possível criar o e-mail', body: `${s.name}: ${String(error).slice(0, 120)}`, tag: `workspace-${s.id}`, url: '/admin#subscribers' });
   if (!whatsappConfigured) return;
   await notifyAdmin(ok
@@ -252,8 +258,7 @@ export async function notifyWorkspace({ ok, subscriberId, email, password, error
       ...contactLines(s),
       `*Plano:* ${s.plan_name}`,
       '',
-      `*E-mail:* ${email}`,
-      `*Senha temporária:* ${password}`,
+      ...accountLines,
       group?.ok ? `*Grupo:* adicionado em ${group.group}` : null,
       group && !group.ok && !group.skipped ? `*Grupo:* NÃO foi adicionado (${group.error}). Adicione pelo Google Admin.` : null,
       '',
@@ -267,6 +272,7 @@ export async function notifyWorkspace({ ok, subscriberId, email, password, error
       ...contactLines(s),
       `*Plano:* ${s.plan_name}`,
       `*Motivo:* ${error}`,
+      ...(list.length ? ['', `*Criadas antes do erro (${list.length}):*`, ...list.map((a) => `${a.email}  |  senha: ${a.password}`)] : []),
       '',
       'Crie pelo painel (Assinantes → Criar e-mail) depois de resolver, ou direto no Google Admin.',
     ].join('\n'));

@@ -13,7 +13,10 @@ export async function loadSubscribers() {
 /** E-mail institucional (Google Workspace) do assinante. */
 function workspaceLine(s) {
   const w = s.workspace_email;
-  if (w && !w.startsWith('(')) return `<div class="ws-line" title="E-mail institucional (Google Workspace)">${esc(w)}</div>`;
+  if (w && !w.startsWith('(')) {
+    const err = s.workspace_error ? `<div class="ws-line ws-error" title="${esc(s.workspace_error)}">${esc(s.workspace_error.slice(0, 80))}</div>` : '';
+    return w.split(/,\s*/).map((e) => `<div class="ws-line" title="E-mail institucional (Google Workspace)">${esc(e)}</div>`).join('') + err;
+  }
   if (w === '(criando)') return '<div class="muted small">Criando e-mail…</div>';
   if (s.workspace_error) return `<div class="ws-line ws-error" title="${esc(s.workspace_error)}">E-mail não criado: ${esc(s.workspace_error.slice(0, 60))}</div>`;
   return '';
@@ -27,7 +30,7 @@ function render() {
     <tr>
       <td><strong>${esc(s.name)}</strong>${s.notes ? `<div class="muted">${esc(s.notes)}</div>` : ''}</td>
       <td>${esc(s.email)}<div class="muted">${esc(s.phone)}${s.birth_date ? ` · nasc. ${fmtDate(s.birth_date)}` : ''}</div>${workspaceLine(s)}</td>
-      <td>${esc(s.plan_name)} <span class="muted">· ${brl(s.price_cents)}</span>${s.plan_price_cents != null && s.plan_price_cents !== s.price_cents ? `<div class="muted small" title="Valor travado de quando assinou">preço atual do plano: ${brl(s.plan_price_cents)}</div>` : ''}</td>
+      <td>${esc(s.plan_name)}${s.seats > 1 ? ` <span class="badge b-ativo">${s.seats} vagas</span>` : ''} <span class="muted">· ${brl(s.price_cents)}</span>${s.plan_price_cents != null && s.plan_price_cents * (s.seats || 1) !== s.price_cents ? `<div class="muted small" title="Valor travado de quando assinou">preço atual do plano: ${brl(s.plan_price_cents * (s.seats || 1))}</div>` : ''}</td>
       <td>${fmtDate(s.start_date)}</td>
       <td>dia ${s.due_day}</td>
       <td>${badge(s.status)}${autopayBadge(s)}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
@@ -63,8 +66,12 @@ async function openSubscriber(sub) {
   // valor travado do assinante (cadastro novo: preço do plano escolhido)
   const planPrice = (id) => plans.find((p) => p.id === Number(id))?.price_cents;
   const toReais = (c) => (c == null ? '' : (c / 100).toFixed(2).replace('.', ','));
+  f.seats.value = sub?.seats ?? 1;
   f.monthly.value = toReais(sub ? sub.price_cents : planPrice(f.plan_id.value));
-  f.plan_id.onchange = () => { f.monthly.value = toReais(planPrice(f.plan_id.value)); };
+  // mudou o plano ou as vagas: sugere valor da vaga × vagas (o admin pode digitar outro)
+  const suggest = () => { f.monthly.value = toReais((planPrice(f.plan_id.value) ?? 0) * Math.max(1, Number(f.seats.value) || 1)); };
+  f.plan_id.onchange = suggest;
+  f.seats.oninput = suggest;
   $('#dlg-sub').showModal();
 }
 

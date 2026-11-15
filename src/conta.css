@@ -188,3 +188,11 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 #holder-edit a, #mp-link-alt a { color: var(--accent); }
 #mp-link-alt { text-align: center; margin: 4px 0 0; }
 .fine.lock svg { vertical-align: -2px; }
+
+/* quantas vagas */
+.seats-box { text-align: center; }
+.seats-stepper { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 14px 0 6px; }
+.seats-stepper .btn { width: 48px; height: 48px; padding: 0; font-size: 22px; }
+#seats-n { font-size: 32px; font-weight: 700; min-width: 2ch; }
+.seats-total { font-size: 16px; margin: 6px 0 14px; }
+.seats-note { display: block; font-size: 13px; }

@@ -189,3 +189,9 @@ update public.subscribers s set monthly_cents = p.price_cents from public.plans 
 alter table public.subscribers add column if not exists workspace_email      text;
 alter table public.subscribers add column if not exists workspace_created_at timestamptz;
 alter table public.subscribers add column if not exists workspace_error      text;
+
+-- v16: várias vagas na mesma assinatura (ex.: 3 vagas do Max). monthly_cents passa a ser o TOTAL
+-- (valor da vaga × vagas). Cada vaga ganha um e-mail no Workspace (nome01, nome02...), guardados em workspace_email
+-- separados por vírgula. plans.max_seats = máximo de vagas que um cliente pode comprar de uma vez (1 = só uma).
+alter table public.subscribers add column if not exists seats integer not null default 1 check (seats between 1 and 50);
+alter table public.plans add column if not exists max_seats integer not null default 1 check (max_seats between 1 and 50);
