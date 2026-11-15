@@ -19,11 +19,11 @@ const SOLD_OUT_MSG = 'Este plano está esgotado no momento. Escolha outro plano 
 
 export const memberApi = Router();
 // Versão dos Termos de uso / Política de privacidade (mude junto com a data nas páginas termos.html e privacidade.html)
-const TERMS_VERSION = '2026-11-14';
+const TERMS_VERSION = '2026-11-15';
 // O cliente paga só com cartão de crédito, em assinatura (renovação automática).
 // Pix pelo próprio cliente fica desligado; quem não conseguir pagar recebe um Pix gerado pelo admin no painel.
-// Para voltar a oferecer Pix na área do assinante: PIX_ENABLED=on no .env
-export const PIX_ENABLED = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'off');
+// Pix na área do assinante: ligado por padrão (o cartão às vezes é recusado pelo antifraude). PIX_ENABLED=off desliga.
+export const PIX_ENABLED = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'on');
 // Cartão: por padrão o cliente paga o mês de forma avulsa (pedido normal no Mercado Pago, sem assinatura),
 // porque o antifraude recusava quase toda assinatura. Para voltar à assinatura: CARD_SUBSCRIPTION=on no .env
 export const CARD_SUBSCRIPTION = /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'off');
