@@ -18,8 +18,8 @@ const REMINDER_DAYS = Math.max(0, Number(process.env.REMINDER_DAYS_BEFORE ?? 3) 
 // Aviso de que o pagamento passa a ser automático no cartão (clientes sem renovação automática), em dias antes do vencimento
 // Pix como alternativa ao cartão (mesma chave do member.js): muda os textos dos lembretes
 const PIX_ON = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'on'); // mesma chave do member.js (padrão: ligado)
-const CARD_SUB = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'off') && /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on'); // cartão com assinatura? (padrão: avulso)
-const CARD_ON = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'off'); // cartão para pagamentos novos (padrão: desligado, só Pix)
+const CARD_SUB = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'on') && /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on'); // cartão com assinatura? (padrão: avulso)
+const CARD_ON = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'on'); // cartão para pagamentos novos
 const PAY_HOW = !CARD_ON ? 'Pix' : PIX_ON ? 'cartão de crédito ou Pix' : 'cartão de crédito';
 const CARD_NOTICE_DAYS = Math.max(REMINDER_DAYS + 1, Number(process.env.CARD_NOTICE_DAYS_BEFORE ?? 5) || 5);
 // Quantos dias antes do fim do acesso perguntar se o cliente quer continuar

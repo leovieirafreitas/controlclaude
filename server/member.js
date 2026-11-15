@@ -25,16 +25,13 @@ const TERMS_VERSION = '2026-11-15';
 // Pix pelo próprio cliente fica desligado; quem não conseguir pagar recebe um Pix gerado pelo admin no painel.
 // Pix na área do assinante: ligado por padrão (o cartão às vezes é recusado pelo antifraude). PIX_ENABLED=off desliga.
 export const PIX_ENABLED = /^(on|1|true|sim)$/i.test(process.env.PIX_ENABLED || 'on');
-// Cartão: por padrão o cliente paga o mês de forma avulsa (pedido normal no Mercado Pago, sem assinatura),
-// CARD_SUBSCRIPTION=off no .env: cartão avulso (um mês por vez). Padrão: assinatura com renovação automática (em teste desde 15/11/2026).
-// Cartão de crédito para pagamentos novos: DESLIGADO por padrão (o antifraude do Mercado Pago recusava tudo: o cliente paga por Pix).
-// Quem já tem renovação automática no cartão continua nela. CARD_ENABLED=on no .env volta a oferecer o cartão.
-export const CARD_ENABLED = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'off');
+// O cliente escolhe na área do assinante: Pix, cartão avulso (só aquele mês) ou cartão com renovação automática (assinatura).
+//   CARD_ENABLED=off       tira o cartão (só Pix; quem já tem renovação automática continua nela)
+//   CARD_SUBSCRIPTION=off  tira a opção de renovação automática (cartão só avulso)
+export const CARD_ENABLED = /^(on|1|true|sim)$/i.test(process.env.CARD_ENABLED || 'on');
 export const CARD_SUBSCRIPTION = CARD_ENABLED && /^(on|1|true|sim)$/i.test(process.env.CARD_SUBSCRIPTION || 'on');
-const CARD_ONCE_ENABLED = !CARD_SUBSCRIPTION;
-// Depois de uma renovação automática recusada, espera 7 dias antes de tentar de novo (tentativas seguidas pioram o antifraude)
-const AUTOPAY_RETRY_MS = 7 * 24 * 3600_000;
-// Cartão avulso recusado pelo antifraude: espera antes de deixar tentar de novo no cartão (o Pix continua liberado)
+const CARD_ONCE_ENABLED = CARD_ENABLED;
+// Cartão recusado pelo antifraude (avulso ou assinatura): espera antes de deixar tentar de novo no cartão (o Pix continua liberado)
 const CARD_COOLDOWN_MS = 30 * 60_000;
 const cooldownMessage = (ms) => `O Mercado Pago recusou este cartão na análise de segurança. Tentar de novo agora piora a análise: aguarde ${Math.max(1, Math.ceil(ms / 60_000))} minutos para tentar no cartão${PIX_ENABLED ? ' ou pague agora por Pix (aba Pix, acima)' : ''}.`;
 export const memberSession = makeSession({ cookie: 'msid', maxAgeMs: 30 * 24 * 3600_000, sameSite: 'lax' });
@@ -372,8 +369,8 @@ async function memberViewByEmail(email) {
       first_charge: first,
       // renovação automática no cartão (assinatura do Mercado Pago)
       // renovação automática recusada há menos de 7 dias: a tela vai direto para o pagamento avulso do mês
-      autopay_blocked: CARD_SUBSCRIPTION && Boolean(sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS
-        && !(sub.mp_preapproval_id && sub.autopay_status === 'authorized')),
+      // segundos que faltam para poder tentar de novo no cartão depois de uma recusa do antifraude
+      card_wait_s: sub.autopay_failed_at ? Math.max(0, Math.ceil((CARD_COOLDOWN_MS - (Date.now() - new Date(sub.autopay_failed_at).getTime())) / 1000)) : 0,
       autopay: sub.mp_preapproval_id && sub.autopay_status !== 'cancelled'
         ? { status: sub.autopay_status, card_last4: sub.card_last4, card_brand: sub.card_brand, next_charge_date: sub.next_charge_date }
         : null,
@@ -387,6 +384,7 @@ async function memberViewByEmail(email) {
     can_pay: mpConfigured,
     pix_enabled: mpConfigured && PIX_ENABLED,
     card_enabled: CARD_ENABLED,
+    card_once: CARD_ONCE_ENABLED,
     card_subscription: CARD_SUBSCRIPTION,
     mp_public_key: mpConfigured ? MP_PUBLIC_KEY : null,
   };
@@ -518,42 +516,32 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
     };
   }
 
-  // 1º pagamento proporcional: sempre avulso (a assinatura do Mercado Pago cobraria o mês cheio)
-  const blocked = !CARD_SUBSCRIPTION || charge.first || sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
-  // Com a assinatura ligada, o cliente só paga avulso nos casos acima (1º pagamento proporcional ou assinatura recusada há pouco)
-  if (req.body?.mode === 'once' && !CARD_ONCE_ENABLED && !blocked) {
-    throw new ApiError(400, 'O pagamento é por assinatura no cartão de crédito. Se não conseguir, fale com a gente no WhatsApp que ajudamos você.');
+  // O cliente escolhe: avulso (mode 'once') ou renovação automática. O 1º pagamento proporcional é sempre avulso
+  // (a assinatura do Mercado Pago cobraria o mês cheio).
+  const once = req.body?.mode === 'once' || !CARD_SUBSCRIPTION || charge.first;
+  // Antifraude recusou há pouco: tentar de novo em seguida piora (o Mercado Pago bloqueia as próximas tentativas)
+  if (sub.autopay_failed_at) {
+    const left = CARD_COOLDOWN_MS - (Date.now() - new Date(sub.autopay_failed_at).getTime());
+    if (left > 0) throw new ApiError(429, cooldownMessage(left));
   }
-  if (req.body?.mode === 'once' || blocked) {
+  const who = holder ? ` (titular: ${holder.name})` : '';
+  let result;
+  if (once) {
     if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
-    // Antifraude recusou há pouco: tentar de novo em seguida piora (o Mercado Pago bloqueia as próximas tentativas)
-    if (!CARD_SUBSCRIPTION && sub.autopay_failed_at) {
-      const left = CARD_COOLDOWN_MS - (Date.now() - new Date(sub.autopay_failed_at).getTime());
-      if (left > 0) throw new ApiError(429, cooldownMessage(left));
-    }
-    const result = await payWithCard({ ...sub, email: c.email }, chargePlan, charge.month, card, deviceId, holder);
-    if (result.status === 'rejected') {
-      notifyCardRejected(sub.id, { once: true, message: result.message + (holder ? ` (titular: ${holder.name})` : '') });
-      if (!CARD_SUBSCRIPTION && isRiskReject(result.detail)) {
-        await run('UPDATE subscribers SET autopay_failed_at = now() WHERE id = ?', [sub.id]);
-        result.message = cooldownMessage(CARD_COOLDOWN_MS);
-        result.cooldown = true;
-      }
-    } else if (result.status === 'approved' && !CARD_SUBSCRIPTION && sub.autopay_failed_at) {
-      await run('UPDATE subscribers SET autopay_failed_at = NULL WHERE id = ?', [sub.id]);
-    }
-    return { ...result, view: await memberView(c) };
-  }
-
-  const result = await startAutopay({ ...sub, email: c.email }, plan, card, deviceId);
-  if (result.status === 'rejected') {
-    await run('UPDATE subscribers SET autopay_failed_at = now() WHERE id = ?', [sub.id]);
-    const who = holder ? ` (titular: ${holder.name})` : '';
-    notifyCardRejected(sub.id, { once: false, message: (result.reason || result.message) + who });
+    result = await payWithCard({ ...sub, email: c.email }, chargePlan, charge.month, card, deviceId, holder);
+    if (result.status === 'rejected') notifyCardRejected(sub.id, { once: true, message: result.message + who });
   } else {
+    result = await startAutopay({ ...sub, email: c.email }, plan, card, deviceId);
+    if (result.status === 'rejected') notifyCardRejected(sub.id, { once: false, message: (result.reason || result.message) + who });
+  }
+  // recusa do antifraude (no avulso) ou da validação do cartão (na assinatura): trava novas tentativas no cartão por um tempo
+  if (result.status === 'rejected' && (!once || isRiskReject(result.detail))) {
+    await run('UPDATE subscribers SET autopay_failed_at = now() WHERE id = ?', [sub.id]);
+    result.message = cooldownMessage(CARD_COOLDOWN_MS);
+    result.cooldown = true;
+  } else if (result.status === 'approved' && sub.autopay_failed_at) {
     await run('UPDATE subscribers SET autopay_failed_at = NULL WHERE id = ?', [sub.id]);
   }
-  // pagamento avulso (plano B) está desligado: não oferecer na tela
   return { ...result, allow_once: false, view: await memberView(c) };
 })));
 
@@ -565,7 +553,7 @@ memberApi.post('/pay/challenge', h(mpSafe(async (req) => {
   if (!/^ORD[A-Z0-9]+$/.test(orderId)) throw new ApiError(400, 'Pedido inválido.');
   const result = await cardOrderResult(orderId, sub.id);
   if (!result) throw new ApiError(404, 'Pedido não encontrado.');
-  if (result.status === 'rejected' && !CARD_SUBSCRIPTION && isRiskReject(result.detail)) {
+  if (result.status === 'rejected' && isRiskReject(result.detail)) {
     await run('UPDATE subscribers SET autopay_failed_at = now() WHERE id = ?', [sub.id]);
   }
   return { ...result, view: await memberView(c) };
