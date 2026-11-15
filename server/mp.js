@@ -4,7 +4,7 @@
 // Os dados do cartão são tokenizados no navegador pelo SDK do Mercado Pago (Card Payment Brick);
 // o servidor só recebe o token.
 import { all, get, run } from './db.js';
-import { notifyPayment, notifyUnderpaid, notifyWorkspace } from './whatsapp.js';
+import { notifyPayment, notifyUnderpaid, notifyWorkspace, notifyReactivated } from './whatsapp.js';
 import { provisionWorkspace } from './workspace.js';
 
 const TOKEN = process.env.MP_ACCESS_TOKEN || '';
@@ -86,6 +86,8 @@ export async function activateIfPaid(subId, month, paidNowCents) {
   if (Number(s.paid) >= Number(s.price_cents)) {
     if (s.status !== 'ativo') {
       await run("UPDATE subscribers SET status = 'ativo' WHERE id = ?", [s.id]);
+      // estava desativado por falta de pagamento: avisa o admin para liberar o acesso de novo
+      if (s.status === 'pausado') notifyReactivated(s.id).catch((e) => console.error('Aviso de reativação:', e.message));
       // Plano ATIVADO agora pelo pagamento (não é renovação): cria o e-mail institucional, se ainda não tem
       provisionWorkspace(s.id, notifyWorkspace).catch((e) => console.error('Google Workspace:', e.message));
     }
