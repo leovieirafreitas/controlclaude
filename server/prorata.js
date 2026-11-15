@@ -1,15 +1,15 @@
 // Vencimento no mesmo dia para todos os clientes NOVOS, com o 1º pagamento proporcional (pro rata).
 //
-// Exemplo com vencimento no dia 5 e plano de R$ 200:
-//   assina dia 15 → paga 20 dias (R$ 133,33) e depois R$ 200 todo dia 5
-//   assina dia 2  → faltam 3 dias: paga os 3 dias + o mês seguinte inteiro (R$ 220) e só volta a pagar no dia 5 do outro mês
-//   assina dia 29 → faltam 6 dias (7 ou menos): mesma regra, proporcional + mês seguinte
-//   assina dia 5  → mês cheio, sem ajuste
+// Exemplo com vencimento no dia 28 e plano de R$ 200:
+//   assina dia 15 → paga 13 dias (R$ 86,67) e depois R$ 200 todo dia 28
+//   assina dia 25 → faltam 3 dias (7 ou menos): paga os 3 dias + o mês seguinte inteiro (R$ 220) e só volta a pagar no dia 28 do outro mês
+//   assina dia 30 → paga os dias até o dia 28 do mês seguinte (proporcional) e depois R$ 200 todo dia 28
+//   assina dia 28 → mês cheio, sem ajuste
 //
-// Configuração (tabela settings): prorata_on = on|off (padrão: on) · prorata_day = 1..28 (padrão: 5)
+// Configuração (tabela settings): prorata_on = on|off (padrão: on) · prorata_day = 1..28 (padrão: 28)
 import { get } from './db.js';
 
-export const PRORATA_DEFAULT_DAY = 5;
+export const PRORATA_DEFAULT_DAY = 28; // "final do mês": dia 28 existe em todos os meses
 const MERGE_DAYS = 7; // faltando até 7 dias para o vencimento: cobra junto o mês seguinte
 
 export async function prorataConfig() {
@@ -42,8 +42,13 @@ export function firstCharge(todayISO, dueDay, monthlyCents) {
   const days = Math.round((Date.parse(dueISO) - Date.UTC(y, m - 1, d)) / 86_400_000);
   const part = Math.round((monthly * Math.min(days, 30)) / 30);
   if (before) {
-    // paga os dias até o vencimento + o mês que começa nele (o pagamento quita o mês atual)
-    return { cents: part + monthly, month: ym(y, m), days, part_cents: part, merged: true, next_due: iso(y, m + 1) };
+    if (days <= MERGE_DAYS) {
+      // vencimento logo ali: paga os dias que faltam + o mês que começa nele (o pagamento quita o mês atual)
+      return { cents: part + monthly, month: ym(y, m), days, part_cents: part, merged: true, next_due: iso(y, m + 1) };
+    }
+    // paga só os dias até o vencimento deste mês; nele vence a 1ª mensalidade cheia.
+    // Na contabilidade, este pagamento quita o ciclo anterior (mês passado), para o mês atual continuar em aberto.
+    return { cents: part, month: ym(y, m - 1), days, part_cents: part, merged: false, next_due: dueISO };
   }
   if (days <= MERGE_DAYS) {
     // fim do mês, vencimento logo no começo do próximo: proporcional + o mês seguinte (o pagamento quita o mês seguinte)
