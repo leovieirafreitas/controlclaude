@@ -279,7 +279,7 @@ let state = null;
 function renderPlanChoices(plans, currentId) {
   $('#mini-plans').innerHTML = plans.map((p) => `
     <div class="mini-plan ${p.featured ? 'featured' : ''}">
-      <div><strong>${esc(p.name)}</strong>${p.description ? `<span class="muted">${esc(p.description)}</span>` : ''}</div>
+      <div><strong>${esc(p.name)}</strong>${p.description ? `<span class="muted">${esc(p.description)}</span>` : ''}${p.max_seats > 1 ? `<span class="muted seats-note">Preço por vaga · até ${p.max_seats} vagas</span>` : ''}</div>
       <div class="mini-right">
         <span class="mini-price">${brl(p.price_cents)}<small>/mês</small></span>
         ${p.sold_out
@@ -313,8 +313,10 @@ function render(data) {
     const next = sub.next_charge;
     $('#status').textContent = sub.status === 'ativo' && sub.cancel_at ? `Ativo até ${fmtDate(sub.cancel_at)}` : STATUS[sub.status] || sub.status;
     $('#status').className = `status st-${sub.status === 'ativo' && sub.cancel_at ? 'aguardando' : sub.status}`;
-    $('#plan-name').textContent = sub.plan.name;
-    $('#plan-price').textContent = `${brl(sub.plan.price_cents)} por mês`;
+    $('#plan-name').textContent = sub.seats > 1 ? `${sub.plan.name} · ${sub.seats} vagas` : sub.plan.name;
+    $('#plan-price').textContent = sub.seats > 1
+      ? `${brl(sub.plan.price_cents)} por mês (${sub.seats} × ${brl(Math.round(sub.plan.price_cents / sub.seats))})`
+      : `${brl(sub.plan.price_cents)} por mês`;
     $('#since').textContent = fmtDate(sub.start_date);
     $('#due').textContent = `Todo dia ${sub.due_day}`;
     const scheduled = active && Boolean(sub.cancel_at);
@@ -376,13 +378,46 @@ let payMode = 'pay'; // 'pay' = assinar com renovação automática · 'card' = 
 
 /** Escolhe o plano (cria/atualiza a assinatura) e abre o pagamento. */
 async function choosePlan(planId) {
-  const view = await call('/subscribe', { method: 'POST', body: { plan_id: planId } });
+  // plano com várias vagas (ex.: Max até 5): pergunta quantas antes de assinar
+  const plans = state?.plans || (await call('/me')).plans || [];
+  const plan = plans.find((p) => p.id === Number(planId));
+  const sub = state?.subscription;
+  const locked = sub && sub.plan.id === Number(planId) && ['ativo', 'pausado'].includes(sub.status);
+  let seats = 1;
+  if (plan && plan.max_seats > 1 && !locked) {
+    seats = await askSeats(plan, sub?.plan.id === plan.id ? sub.seats : 1);
+    if (!seats) return; // desistiu
+  }
+  const view = await call('/subscribe', { method: 'POST', body: { plan_id: planId, seats } });
   render(view);
   if (view.manual) {
     flash(view.manual.pix_key ? `Plano escolhido! Pague via Pix na chave ${view.manual.pix_key}.` : 'Plano escolhido! Entraremos em contato para o pagamento.', 'ok');
     return;
   }
   openPayment(state.card_subscription ? 'pay' : 'once');
+}
+
+/** Pergunta quantas vagas (1 até o máximo do plano). Devolve o número ou null se fechar. */
+function askSeats(plan, initial = 1) {
+  const max = Math.max(1, Math.min(plan.max_seats, plan.licenses_left ?? plan.max_seats));
+  let n = Math.min(Math.max(1, initial), max);
+  const dlg = $('#seats-dlg');
+  const paint = () => {
+    $('#seats-n').textContent = n;
+    $('#seats-total').innerHTML = `<strong>${brl(plan.price_cents * n)}</strong>/mês${n > 1 ? ` <span class="muted">(${n} × ${brl(plan.price_cents)})</span>` : ''}`;
+    $('#seats-minus').disabled = n <= 1;
+    $('#seats-plus').disabled = n >= max;
+  };
+  $('#seats-plan').textContent = plan.name;
+  $('#seats-max').textContent = max === 1 ? 'Só há 1 vaga livre neste plano agora.' : `Você pode escolher de 1 a ${max} vagas. Cada vaga é um acesso separado.`;
+  $('#seats-minus').onclick = () => { if (n > 1) { n--; paint(); } };
+  $('#seats-plus').onclick = () => { if (n < max) { n++; paint(); } };
+  paint();
+  return new Promise((resolve) => {
+    dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? n : null);
+    dlg.returnValue = '';
+    dlg.showModal();
+  });
 }
 
 async function unmountBrick() {
@@ -474,7 +509,7 @@ function openPayment(mode = 'pay') {
   payMode = mode;
   const price = brl(sub.plan.price_cents);
   $('#pay-eyebrow').innerHTML = `${methodIcon('credito')} ${mode === 'card' ? 'Trocar cartão' : mode === 'once' ? 'Cartão de crédito · mensalidade' : 'Cartão de crédito · renovação automática'}`;
-  $('#pay-plan').textContent = sub.plan.name;
+  $('#pay-plan').textContent = sub.seats > 1 ? `${sub.plan.name} · ${sub.seats} vagas` : sub.plan.name;
   $('#pay-amount').textContent = `${price}/mês`;
   $('#pay-month').innerHTML = mode === 'card'
     ? 'As próximas cobranças automáticas serão feitas no novo cartão. <strong>Nada é cobrado agora.</strong>'

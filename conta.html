@@ -190,6 +190,24 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-13.5 7.8L3 21l1.2-4.5A9 9 0 1 1 21 12Z"/></svg>
   </a>
 
+  <!-- quantas vagas (planos com mais de uma vaga, ex.: Max) -->
+  <dialog id="seats-dlg">
+    <form method="dialog" class="checkout-step seats-box">
+      <h3>Quantas vagas do <span id="seats-plan"></span>?</h3>
+      <p class="muted" id="seats-max"></p>
+      <div class="seats-stepper">
+        <button type="button" class="btn btn-outline" id="seats-minus" aria-label="Menos uma vaga">−</button>
+        <span id="seats-n" aria-live="polite">1</span>
+        <button type="button" class="btn btn-outline" id="seats-plus" aria-label="Mais uma vaga">+</button>
+      </div>
+      <p class="seats-total" id="seats-total"></p>
+      <div class="actions-row">
+        <button class="btn btn-ghost" value="cancel">Voltar</button>
+        <button class="btn btn-primary" value="ok">Continuar</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="cancel-dlg">
     <form method="dialog" class="checkout-step">
       <h3>Cancelar seu plano?</h3>

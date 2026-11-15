@@ -40,9 +40,10 @@ function renderPlans(plans) {
         <h3>${esc(p.name)}</h3>
         ${p.description ? `<p class="plan-desc">${esc(p.description)}</p>` : ''}
         <div class="price">
-          <span class="cur">R$</span><span class="int">${Number(reais).toLocaleString('pt-BR')}</span><span class="dec">,${cents}</span><span class="per">/mês</span>
+          <span class="cur">R$</span><span class="int">${Number(reais).toLocaleString('pt-BR')}</span><span class="dec">,${cents}</span><span class="per">/mês${p.max_seats > 1 ? " por vaga" : ""}</span>
         </div>
         ${spots(p)}
+        ${p.max_seats > 1 ? `<p class="plan-desc">Compre de 1 a ${p.max_seats} vagas (um acesso por vaga).</p>` : ""}
         ${features.length ? `<ul class="features">${features.map((f) => `<li>${CHECK}<span>${esc(f)}</span></li>`).join('')}</ul>` : '<div class="spacer"></div>'}
         ${p.sold_out
     ? '<button class="btn btn-outline btn-lg btn-block" disabled>Esgotado</button>'

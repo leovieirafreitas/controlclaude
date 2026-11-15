@@ -7,7 +7,7 @@
 // Esqueci a senha: código por e-mail (Resend) + nova senha.
 import { Router } from 'express';
 import { all, get, run } from './db.js';
-import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, planSoldOut } from './routes.js';
+import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL, planSoldOut, checkSeats } from './routes.js';
 import { EMAIL_RE, OtpSilentError, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
 import { notifyCancel, notifyKeep, notifySignup, notifyCardRejected } from './whatsapp.js';
@@ -293,7 +293,8 @@ async function memberViewByEmail(email) {
       JOIN plans p ON p.id = s.plan_id
       JOIN customers c ON c.id = s.customer_id
       WHERE c.email = ? ORDER BY s.id DESC LIMIT 1`, [month, email]),
-    all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, ${SOLD_OUT_SQL} AS sold_out
+    all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, p.max_seats, ${SOLD_OUT_SQL} AS sold_out,
+                ${LICENSES_LEFT_SQL} AS licenses_left
          FROM plans p WHERE p.active ORDER BY p.price_cents`),
     all(`
       SELECT pay.ref_month, pay.amount_cents, pay.paid_at, pay.method FROM payments pay
@@ -313,7 +314,7 @@ async function memberViewByEmail(email) {
       next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     }
     subscription = {
-      status: sub.status, start_date: sub.start_date, due_day: sub.due_day, cancel_at: sub.cancel_at || null,
+      status: sub.status, start_date: sub.start_date, due_day: sub.due_day, cancel_at: sub.cancel_at || null, seats: Number(sub.seats) || 1,
       plan: { id: sub.plan_id, name: sub.plan_name, price_cents: sub.price_cents, description: sub.plan_description,
         sold_out: sub.plan_sold_out && !HOLDS_LICENSE.includes(sub.status) },
       next_charge: { month: next, current_paid: next !== month },
@@ -370,25 +371,31 @@ memberApi.post('/subscribe', h(async (req) => {
   if (sub && sub.status === 'ativo' && sub.plan_id !== plan.id) {
     throw new ApiError(409, 'Você já tem um plano ativo. Para trocar de plano, fale com o suporte.');
   }
+  // quantas vagas (só planos com max_seats > 1, ex.: Max até 5). Depois de pago, só o admin muda.
+  let seats = checkSeats(req.body?.seats, plan.max_seats);
   const holdsLicense = sub && sub.plan_id === plan.id && HOLDS_LICENSE.includes(sub.status);
-  if (!holdsLicense && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
+  if (holdsLicense) seats = Number(sub.seats) || 1;
+  if (!holdsLicense && await planSoldOut(plan.id, seats)) {
+    throw new ApiError(409, seats > 1 ? `Não há ${seats} vagas livres no ${plan.name} agora. Escolha menos vagas ou fale com o suporte.` : SOLD_OUT_MSG);
+  }
+  const total = plan.price_cents * seats;
 
   const today = todayISO();
   if (!sub) {
     await run(`
-      INSERT INTO subscribers (customer_id, name, email, phone, birth_date, plan_id, start_date, due_day, status, notes, monthly_cents)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando', 'Cadastro pela área do assinante', ?)`,
-    [c.id, c.name, c.email, c.phone, c.birth_date, plan.id, today, Math.min(Number(today.slice(8, 10)), 28), plan.price_cents]);
+      INSERT INTO subscribers (customer_id, name, email, phone, birth_date, plan_id, start_date, due_day, status, notes, monthly_cents, seats)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando', 'Cadastro pela área do assinante', ?, ?)`,
+    [c.id, c.name, c.email, c.phone, c.birth_date, plan.id, today, Math.min(Number(today.slice(8, 10)), 28), total, seats]);
   } else if (sub.plan_id !== plan.id) {
-    await run("UPDATE subscribers SET plan_id = ?, monthly_cents = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END, mp_preapproval_pending = NULL WHERE id = ?", [plan.id, plan.price_cents, sub.id]);
+    await run("UPDATE subscribers SET plan_id = ?, monthly_cents = ?, seats = ?, status = CASE WHEN status = 'cancelado' THEN 'aguardando' ELSE status END, mp_preapproval_pending = NULL WHERE id = ?", [plan.id, total, seats, sub.id]);
     // Link de assinatura gerado para o plano anterior deixa de valer (o valor era outro)
     if (sub.mp_preapproval_pending) {
       cancelPreapproval(sub.mp_preapproval_pending).catch((e) => console.error('Mercado Pago (cancelar link antigo):', e.message));
     }
-    await setAutopayAmount(sub, plan.price_cents).catch((e) => console.error('Mercado Pago (valor da renovação):', e.message));
+    await setAutopayAmount(sub, total).catch((e) => console.error('Mercado Pago (valor da renovação):', e.message));
   } else if (sub.status === 'cancelado' || (sub.status === 'aguardando' && !(await get('SELECT 1 AS x FROM payments WHERE subscriber_id = ?', [sub.id])))) {
-    // voltou depois de cancelar, ou ainda não tinha pago nada: assina pelo preço atual do plano
-    await run('UPDATE subscribers SET monthly_cents = ? WHERE id = ?', [plan.price_cents, sub.id]);
+    // voltou depois de cancelar, ou ainda não tinha pago nada: assina pelo preço atual do plano (e pode mudar as vagas)
+    await run('UPDATE subscribers SET monthly_cents = ?, seats = ? WHERE id = ?', [total, seats, sub.id]);
   }
 
   const view = await memberView(c);
@@ -415,7 +422,7 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (Number(tries.h) >= 8 || Number(tries.d) >= 25) throw new ApiError(429, 'Muitas tentativas de pagamento. Aguarde um pouco ou fale com a gente no WhatsApp.');
   const plan = pricedPlan(await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]), sub);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
-  if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
+  if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id, sub.seats)) throw new ApiError(409, SOLD_OUT_MSG);
   // Pix: paga a mensalidade em aberto (sem renovação automática; o cliente paga mês a mês)
   if (req.body?.method === 'pix') {
     const month = await billingMonth(sub, plan.price_cents);
@@ -473,7 +480,7 @@ memberApi.post('/autopay-link', h(mpSafe(async (req) => {
   const sub = await requireSubscription(c);
   const plan = pricedPlan(await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]), sub);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
-  if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id)) throw new ApiError(409, SOLD_OUT_MSG);
+  if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id, sub.seats)) throw new ApiError(409, SOLD_OUT_MSG);
   if (sub.mp_preapproval_id && sub.autopay_status === 'authorized' && !sub.cancel_at) {
     throw new ApiError(400, 'Sua renovação automática já está ativa.');
   }

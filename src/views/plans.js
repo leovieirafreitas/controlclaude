@@ -46,6 +46,7 @@ function openPlan(plan) {
   f.features.value = plan?.features ?? '';
   f.featured.checked = Boolean(plan?.featured);
   f.max_licenses.value = plan?.max_licenses ?? '';
+  f.max_seats.value = plan?.max_seats ?? 1;
   $('#dlg-plan').showModal();
 }
 

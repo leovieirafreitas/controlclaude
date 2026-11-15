@@ -73,15 +73,26 @@ export const h = (fn) => async (req, res) => {
 
 // Licenças usadas = assinaturas "ativo" ou "pausado" (o pausado guarda a vaga até regularizar).
 // Use em consultas com a tabela plans apelidada de "p".
-export const LICENSES_USED_SQL = `(SELECT COUNT(*) FROM subscribers s WHERE s.plan_id = p.id AND s.status IN ('ativo', 'pausado'))`;
+// Licenças em uso = soma das vagas de quem está ativo/pausado (uma assinatura pode ter várias vagas)
+export const LICENSES_USED_SQL = `(SELECT COALESCE(SUM(s.seats), 0) FROM subscribers s WHERE s.plan_id = p.id AND s.status IN ('ativo', 'pausado'))`;
 export const SOLD_OUT_SQL = `(p.max_licenses IS NOT NULL AND ${LICENSES_USED_SQL} >= p.max_licenses)`;
 // Vagas que sobram (null = sem limite)
 export const LICENSES_LEFT_SQL = `(CASE WHEN p.max_licenses IS NULL THEN NULL ELSE GREATEST(p.max_licenses - ${LICENSES_USED_SQL}, 0) END)`;
 
-/** O plano está sem vagas para uma nova licença? */
-export async function planSoldOut(planId) {
-  const r = await get(`SELECT ${SOLD_OUT_SQL} AS sold_out FROM plans p WHERE p.id = ?`, [planId]);
+/** O plano não tem `seats` licenças livres? (padrão: 1) */
+export async function planSoldOut(planId, seats = 1) {
+  const r = await get(`SELECT (p.max_licenses IS NOT NULL AND ${LICENSES_USED_SQL} + ? > p.max_licenses) AS sold_out FROM plans p WHERE p.id = ?`,
+    [Math.max(1, Number(seats) || 1), planId]);
   return Boolean(r?.sold_out);
+}
+
+/** Quantidade de vagas válida para o plano (1 até plans.max_seats). */
+export function checkSeats(v, maxSeats = 1) {
+  const n = v === undefined || v === null || v === '' ? 1 : Number(v);
+  const max = Math.max(1, Number(maxSeats) || 1);
+  if (!Number.isInteger(n) || n < 1) throw new ApiError(400, 'Quantidade de vagas inválida.');
+  if (n > max) throw new ApiError(400, max === 1 ? 'Este plano é de uma vaga só.' : `Máximo de ${max} vagas neste plano.`);
+  return n;
 }
 
 api.get('/plans', h(() => all(`
@@ -100,21 +111,21 @@ function planValues(body) {
   required(body, 'name', 'price');
   return [
     str(body.name), toCents(body.price), str(body.description), body.active !== false,
-    str(body.features), body.featured === true, checkMaxLicenses(body.max_licenses),
+    str(body.features), body.featured === true, checkMaxLicenses(body.max_licenses), checkSeats(body.max_seats || 1, 50),
   ];
 }
 
 api.post('/plans', h(async ({ body }) => {
-  const r = await run('INSERT INTO plans (name, price_cents, description, active, features, featured, max_licenses) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id', planValues(body));
+  const r = await run('INSERT INTO plans (name, price_cents, description, active, features, featured, max_licenses, max_seats) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id', planValues(body));
   return { id: r.rows[0].id };
 }));
 
 api.put('/plans/:id', h(async ({ body, params }) => {
   const values = planValues(body);
-  await run('UPDATE plans SET name = ?, price_cents = ?, description = ?, active = ?, features = ?, featured = ?, max_licenses = ? WHERE id = ?', [...values, Number(params.id)]);
+  await run('UPDATE plans SET name = ?, price_cents = ?, description = ?, active = ?, features = ?, featured = ?, max_licenses = ?, max_seats = ? WHERE id = ?', [...values, Number(params.id)]);
   // Preço novo vale para quem assinar daqui em diante. Quem já pagou continua com o valor que assinou.
-  // Só quem escolheu este plano e ainda não pagou nada passa para o preço novo.
-  await run(`UPDATE subscribers s SET monthly_cents = ? WHERE s.plan_id = ? AND s.status = 'aguardando'
+  // Só quem escolheu este plano e ainda não pagou nada passa para o preço novo (valor da vaga × vagas).
+  await run(`UPDATE subscribers s SET monthly_cents = ? * s.seats WHERE s.plan_id = ? AND s.status = 'aguardando'
              AND NOT EXISTS (SELECT 1 FROM payments WHERE subscriber_id = s.id)`, [values[1], Number(params.id)]);
   return { ok: true };
 }));
@@ -173,10 +184,14 @@ async function monthlyFor(body, before = null) {
     return v;
   }
   const planId = Number(body.plan_id);
-  if (before && Number(before.plan_id) === planId && before.monthly_cents != null) return before.monthly_cents;
+  const seats = Math.max(1, Number(body.seats) || 1);
+  if (before && Number(before.plan_id) === planId && before.monthly_cents != null && Number(before.seats || 1) === seats) return before.monthly_cents;
   const plan = await get('SELECT price_cents FROM plans WHERE id = ?', [planId]);
-  return plan ? plan.price_cents : null;
+  return plan ? plan.price_cents * seats : null;
 }
+
+/** Vagas pelo painel: o admin pode pôr qualquer quantidade até 50 (o limite do plano vale só para o cliente). */
+const adminSeats = (body) => checkSeats(body.seats || 1, 50);
 
 api.get('/subscribers', h(() => all(`
   SELECT s.*, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, p.price_cents AS plan_price_cents
@@ -246,8 +261,8 @@ api.get('/subscribers/:id/pix/:order', h(async ({ params }) => {
 
 api.post('/subscribers', h(async ({ body }) => {
   const r = await run(`
-    INSERT INTO subscribers (name, email, phone, plan_id, start_date, due_day, status, notes, birth_date, monthly_cents)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, [...(await subscriberValues(body)), await monthlyFor(body)]);
+    INSERT INTO subscribers (name, email, phone, plan_id, start_date, due_day, status, notes, birth_date, monthly_cents, seats)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, [...(await subscriberValues(body)), await monthlyFor(body), adminSeats(body)]);
   return { id: r.rows[0].id };
 }));
 
@@ -255,8 +270,8 @@ api.put('/subscribers/:id', h(async ({ body, params }) => {
   const before = await get(`SELECT s.*, COALESCE(s.monthly_cents, p.price_cents) AS price_cents FROM subscribers s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?`, [Number(params.id)]);
   if (!before) throw new ApiError(404, 'Assinante não encontrado');
   await run(`
-    UPDATE subscribers SET name = ?, email = ?, phone = ?, plan_id = ?, start_date = ?, due_day = ?, status = ?, notes = ?, birth_date = ?, monthly_cents = ?
-    WHERE id = ?`, [...(await subscriberValues(body)), await monthlyFor(body, before), Number(params.id)]);
+    UPDATE subscribers SET name = ?, email = ?, phone = ?, plan_id = ?, start_date = ?, due_day = ?, status = ?, notes = ?, birth_date = ?, monthly_cents = ?, seats = ?
+    WHERE id = ?`, [...(await subscriberValues(body)), await monthlyFor(body, before), adminSeats(body), Number(params.id)]);
   // Admin mudou o status na mão: um cancelamento agendado antigo deixa de valer
   await run(`UPDATE subscribers SET cancel_at = NULL, cancel_requested_at = NULL, retention_answer = NULL
              WHERE id = ? AND cancel_at IS NOT NULL AND (status <> 'ativo' OR cancel_at <= current_date)`, [Number(params.id)]);

@@ -13,7 +13,7 @@ export const publicApi = Router();
 publicApi.get('/info', h(async () => {
   const [{ pix_key, ...settings }, plans] = await Promise.all([ // a chave Pix não vai para a página
     getSettings(),
-    all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, ${SOLD_OUT_SQL} AS sold_out, ${LICENSES_LEFT_SQL} AS licenses_left
+    all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, p.max_seats, ${SOLD_OUT_SQL} AS sold_out, ${LICENSES_LEFT_SQL} AS licenses_left
          FROM plans p WHERE p.active ORDER BY p.price_cents ASC`),
   ]);
   return { settings, plans, online_payment: mpConfigured };

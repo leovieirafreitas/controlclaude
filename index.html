@@ -311,7 +311,10 @@
         <label>Data de nascimento<input name="birth_date" type="date"></label>
         <label>Plano *<select name="plan_id" required></select></label>
       </div>
-      <label>Valor da mensalidade (R$)<input name="monthly" type="text" inputmode="decimal" placeholder="Preço do plano"></label>
+      <div class="row2">
+        <label>Vagas<input name="seats" type="number" min="1" max="50" step="1" value="1"></label>
+        <label>Valor da mensalidade (R$)<input name="monthly" type="text" inputmode="decimal" placeholder="Preço do plano"></label>
+      </div>
       <p class="muted small sub-monthly-hint" id="sub-monthly-hint">Fica travado para este assinante: mudar o preço do plano não altera quem já assina.</p>
       <div class="row2">
         <label>Início *<input name="start_date" type="date" required></label>
@@ -373,7 +376,9 @@
       <label>Descrição curta<input name="description" placeholder="Aparece abaixo do nome na página de vendas"></label>
       <label>Benefícios (um por linha)<textarea name="features" rows="4" placeholder="Acesso completo&#10;Suporte pelo WhatsApp"></textarea></label>
       <label>Limite de licenças<input name="max_licenses" type="number" min="1" step="1" placeholder="Vazio = sem limite">
-        <small class="muted">Ao atingir esse número de assinaturas ativas (ou pausadas), o plano aparece como esgotado e não aceita novas compras.</small></label>
+        <small class="muted">Ao atingir esse número de vagas ativas (ou pausadas), o plano aparece como esgotado e não aceita novas compras.</small></label>
+      <label>Máximo de vagas por cliente<input name="max_seats" type="number" min="1" max="50" step="1" value="1">
+        <small class="muted">Quantas vagas deste plano um cliente pode comprar de uma vez (1 = só uma). Cada vaga ganha um e-mail: nome01, nome02...</small></label>
       <div class="row2">
         <label>Situação
           <select name="active"><option value="1">Ativo</option><option value="0">Inativo</option></select>
