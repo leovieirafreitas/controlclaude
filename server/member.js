@@ -503,13 +503,12 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
     };
   }
 
-  // Plano B antigo (desligado): pagar só este mês de forma avulsa no cartão.
-  // Agora, se a assinatura não passar, o admin gera um Pix no painel e manda para o cliente.
-  if (req.body?.mode === 'once' && !CARD_ONCE_ENABLED) {
-    throw new ApiError(400, 'O pagamento é por assinatura no cartão de crédito. Se não conseguir, fale com a gente no WhatsApp que ajudamos você.');
-  }
   // 1º pagamento proporcional: sempre avulso (a assinatura do Mercado Pago cobraria o mês cheio)
   const blocked = !CARD_SUBSCRIPTION || charge.first || sub.autopay_failed_at && Date.now() - new Date(sub.autopay_failed_at).getTime() < AUTOPAY_RETRY_MS;
+  // Com a assinatura ligada, o cliente só paga avulso nos casos acima (1º pagamento proporcional ou assinatura recusada há pouco)
+  if (req.body?.mode === 'once' && !CARD_ONCE_ENABLED && !blocked) {
+    throw new ApiError(400, 'O pagamento é por assinatura no cartão de crédito. Se não conseguir, fale com a gente no WhatsApp que ajudamos você.');
+  }
   if (req.body?.mode === 'once' || blocked) {
     if (sub.mp_preapproval_id && sub.autopay_status === 'authorized') throw new ApiError(400, 'Você já tem renovação automática ativa.');
     // Antifraude recusou há pouco: tentar de novo em seguida piora (o Mercado Pago bloqueia as próximas tentativas)
