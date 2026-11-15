@@ -7,7 +7,7 @@
 // Esqueci a senha: código por e-mail (Resend) + nova senha.
 import { Router } from 'express';
 import { all, get, run } from './db.js';
-import { firstCharge, prorataConfig, dueDate } from './prorata.js';
+import { firstCharge, prorataConfig, dueDate, currentCycle, shiftMonth } from './prorata.js';
 import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL, planSoldOut, checkSeats } from './routes.js';
 import { EMAIL_RE, OtpSilentError, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
@@ -102,17 +102,15 @@ const customerByEmail = (email) => get('SELECT * FROM customers WHERE email = ?'
 const subscriptionOf = (customerId) => get('SELECT * FROM subscribers WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [customerId]);
 
 /** Mês que o assinante deve pagar agora: o atual, ou o próximo se o atual já está quitado. */
-export async function billingMonth(sub, priceCents) {
-  // nada é devido antes do mês do 1º pagamento (pro rata no fim do mês: o 1º pagamento já quita o mês seguinte)
-  const now = todayISO().slice(0, 7);
-  const month = sub.first_month && sub.first_month > now ? sub.first_month : now;
-  // no mês do 1º pagamento proporcional, o valor devido é o proporcional
-  const due = month === sub.first_month && sub.first_cents != null ? Number(sub.first_cents) : priceCents;
-  const { t: paid } = await get('SELECT COALESCE(SUM(amount_cents), 0) AS t FROM payments WHERE subscriber_id = ? AND ref_month = ?', [sub.id, month]);
-  if (paid < due) return month;
-  const [y, m] = month.split('-').map(Number);
-  const d = new Date(y, m, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+export async function billingMonth(sub, priceCents, today = todayISO()) {
+  const now = today.slice(0, 7);
+  const r = await get(`SELECT
+      COALESCE(SUM(amount_cents) FILTER (WHERE ref_month = ?), 0) AS this,
+      COALESCE(SUM(amount_cents) FILTER (WHERE ref_month = ?), 0) AS prev,
+      COALESCE(SUM(amount_cents) FILTER (WHERE ref_month = ?), 0) AS first
+    FROM payments WHERE subscriber_id = ?`, [now, shiftMonth(now, -1), sub.first_month || '', sub.id]);
+  // o mês atual; o do 1º pagamento, se for à frente; ou o mês passado, se venceu há poucos dias e não foi pago
+  return currentCycle(today, sub, priceCents, r).next;
 }
 
 /**
@@ -324,11 +322,12 @@ async function memberViewByEmail(email) {
     get(`
       SELECT s.*, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, p.description AS plan_description, ${SOLD_OUT_SQL} AS plan_sold_out,
              (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_this_month,
-             (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = s.first_month) AS paid_first
+             (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = s.first_month) AS paid_first,
+             (SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_prev
       FROM subscribers s
       JOIN plans p ON p.id = s.plan_id
       JOIN customers c ON c.id = s.customer_id
-      WHERE c.email = ? ORDER BY s.id DESC LIMIT 1`, [month, email]),
+      WHERE c.email = ? ORDER BY s.id DESC LIMIT 1`, [month, shiftMonth(month, -1), email]),
     all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, p.max_seats, ${SOLD_OUT_SQL} AS sold_out,
                 ${LICENSES_LEFT_SQL} AS licenses_left
          FROM plans p WHERE p.active ORDER BY p.price_cents`),
@@ -344,16 +343,10 @@ async function memberViewByEmail(email) {
   let subscription = null;
   if (sub) {
     // mês em cobrança: o atual, ou o do 1º pagamento se ele for de um mês à frente (pro rata no fim do mês)
-    const ahead = Boolean(sub.first_month && sub.first_month > month);
-    const cur = ahead ? sub.first_month : month;
-    const paidCur = Number(ahead ? sub.paid_first : sub.paid_this_month);
-    const dueCur = cur === sub.first_month && sub.first_cents != null ? Number(sub.first_cents) : sub.price_cents;
-    let next = cur;
-    if (paidCur >= dueCur) {
-      const [y, m] = cur.split('-').map(Number);
-      const d = new Date(y, m, 1);
-      next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    }
+    // (ou o mês passado, se venceu há poucos dias e não foi pago: vencimento no fim do mês)
+    const cycle = currentCycle(todayISO(), sub, sub.price_cents, { this: sub.paid_this_month, prev: sub.paid_prev, first: sub.paid_first });
+    const cur = cycle.month;
+    let next = cycle.next;
     // cliente novo com vencimento fixo e ainda sem pagamento: 1º pagamento proporcional, calculado para hoje
     let first = null;
     if (sub.first_month && !payments.length) {
