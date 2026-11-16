@@ -108,3 +108,32 @@ export function currentCycle(todayISO, sub, price, paid = {}) {
   const settled = got >= due;
   return { month, due, paid: got, settled, next: settled ? shiftMonth(month, 1) : month };
 }
+
+// ------------------------------------------------------------------ janela de vendas
+//
+// Assinaturas NOVAS só abrem do dia 1 até o dia de fechamento (padrão: 15). Do dia seguinte até o fim do mês
+// ninguém novo assina nem faz o 1º pagamento, para não entrar cliente pagando poucos dias perto do vencimento.
+// Quem já pagou alguma vez (assinante, pausado, cancelado que volta) não é afetado.
+// Configuração (tabela settings): sales_window_on = on|off (padrão: on) · sales_close_day = 1..28 (padrão: 15)
+export const SALES_CLOSE_DEFAULT = 15;
+
+const MONTHS_PT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+
+/** Situação da janela hoje, a partir dos valores salvos: { on, close_day, open, opens_on (AAAA-MM-DD), opens_label } */
+export function salesWindow(todayISO, settings = {}) {
+  const on = !/^(off|0|false|nao|não)$/i.test(String(settings.sales_window_on || 'on').trim());
+  const n = Number(settings.sales_close_day);
+  const close = Number.isInteger(n) && n >= 1 && n <= 28 ? n : SALES_CLOSE_DEFAULT;
+  const [y, m, d] = String(todayISO).slice(0, 10).split('-').map(Number);
+  const open = !on || d <= close;
+  const next = ym(y, open ? m : m + 1); // dia 1 em que (re)abre
+  const opens_on = `${next}-01`;
+  return { on, close_day: close, open, opens_on, opens_label: `1º de ${MONTHS_PT[Number(next.slice(5, 7)) - 1]}` };
+}
+
+export async function salesWindowToday(todayISO) {
+  const rows = await Promise.all(['sales_window_on', 'sales_close_day'].map((k) => get('SELECT value FROM settings WHERE key = ?', [k])));
+  return salesWindow(todayISO, { sales_window_on: rows[0]?.value, sales_close_day: rows[1]?.value });
+}
+
+export const salesClosedMessage = (w) => `As inscrições deste mês estão encerradas (abertas do dia 1 ao dia ${w.close_day}). Elas abrem de novo em ${w.opens_label}.`;

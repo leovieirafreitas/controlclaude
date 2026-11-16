@@ -13,7 +13,7 @@ export const api = Router();
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const STATUSES = ['aguardando', 'ativo', 'pausado', 'cancelado'];
-export const SETTING_KEYS = ['brand_name', 'headline', 'subheadline', 'pix_key', 'whatsapp', 'prorata_on', 'prorata_day'];
+export const SETTING_KEYS = ['brand_name', 'headline', 'subheadline', 'pix_key', 'whatsapp', 'prorata_on', 'prorata_day', 'sales_window_on', 'sales_close_day'];
 
 export class ApiError extends Error {
   constructor(status, message) {

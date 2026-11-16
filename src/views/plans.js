@@ -10,6 +10,9 @@ async function loadSettings() {
   // vencimento fixo (pro rata): sem nada salvo, vale ligado no dia 30
   if (!s.prorata_on) f.prorata_on.value = 'on';
   if (!s.prorata_day) f.prorata_day.value = 30;
+  // janela de vendas: sem nada salvo, vale ligada fechando no dia 15
+  if (!s.sales_window_on) f.sales_window_on.value = 'on';
+  if (!s.sales_close_day) f.sales_close_day.value = 15;
 }
 
 function licenses(p) {
