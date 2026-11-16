@@ -25,7 +25,8 @@ export class ApiError extends Error {
 
 // ---------------------------------------------------------------- helpers
 
-export const todayISO = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-DD no fuso local
+export { todayISO } from './time.js'; // AAAA-MM-DD no fuso do negócio (Manaus), não no do servidor
+import { todayISO } from './time.js';
 
 function toCents(value) {
   const n = Number(String(value ?? '').replace(',', '.'));
