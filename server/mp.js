@@ -5,7 +5,7 @@
 // o servidor só recebe o token.
 import { todayISO } from './time.js';
 import { all, get, run } from './db.js';
-import { notifyPayment, notifyUnderpaid, notifyWorkspace, notifyReactivated } from './whatsapp.js';
+import { notifyPayment, notifyUnderpaid, notifyWorkspace, notifyReactivated, notifyPaymentIssue } from './whatsapp.js';
 import { provisionWorkspace } from './workspace.js';
 
 const TOKEN = process.env.MP_ACCESS_TOKEN || '';
@@ -598,4 +598,80 @@ export async function syncPendingCheckouts() {
   for (const { subscriber_id } of subs) added += await syncSubscriber(subscriber_id).catch(() => 0);
   if (added) console.log(`Mercado Pago: ${added} pagamento(s) encontrado(s) na conferência automática`);
   return added;
+}
+
+// ------------------------------------------------------------------ reembolso, contestação e reclamação
+//
+// Um pagamento já aprovado pode ser devolvido (reembolso), contestado no banco do cartão (chargeback) ou entrar em
+// reclamação no Mercado Pago. O sistema avisa o admin e, quando o dinheiro saiu, tira o valor do pagamento no painel.
+
+const AUTO_REF_RE = /^sub_(\d+)$/;
+
+/** Recebe um pagamento da API de pagamentos (/v1/payments). Retorna true se havia um problema (devolvido, contestado ou em reclamação). */
+export async function handlePaymentIssue(d) {
+  if (!d?.id) return false;
+  const total = Math.round(Number(d.transaction_amount || 0) * 100);
+  const refunded = Math.round(Number(d.transaction_amount_refunded || 0) * 100);
+  const kind = d.status === 'charged_back' ? 'contestacao'
+    : d.status === 'in_mediation' ? 'mediacao'
+    : d.status === 'refunded' || refunded > 0 ? 'reembolso' : null;
+  if (!kind || !total) return false;
+  const ref = String(d.external_reference || '');
+  const m = REF_RE.exec(ref);
+  const auto = AUTO_REF_RE.exec(ref);
+  const subId = m ? Number(m[1]) : auto ? Number(auto[1]) : null;
+  if (!subId || !(await get('SELECT 1 AS x FROM subscribers WHERE id = ?', [subId]))) return false;
+
+  // quanto do pagamento deixou de ser nosso: tudo na contestação, o devolvido no reembolso, nada (ainda) na reclamação
+  const lost = kind === 'contestacao' ? total : kind === 'reembolso' ? Math.min(refunded || total, total) : 0;
+
+  // linha do pagamento no painel
+  let row = null;
+  if (auto) {
+    row = await get('SELECT id, ref_month, amount_cents, method FROM payments WHERE subscriber_id = ? AND mp_payment_id = ?', [subId, String(d.id)]);
+  } else {
+    const rows = await all('SELECT id, ref_month, amount_cents, method, notes FROM payments WHERE subscriber_id = ? AND ref_month = ? AND mp_payment_id IS NOT NULL', [subId, `${m[2]}-${m[3]}`]);
+    row = (d.order?.id && rows.find((r) => r.notes && r.notes.includes(String(d.order.id)))) || (rows.length === 1 ? rows[0] : null);
+  }
+  let reopened = false;
+  if (row && lost > 0) {
+    const left = Math.max(0, total - lost);
+    if (Number(row.amount_cents) > left) {
+      await run("UPDATE payments SET amount_cents = ?, notes = trim(coalesce(notes, '') || ?) WHERE id = ?",
+        [left, ` · ${kind === 'contestacao' ? 'contestado no banco' : 'devolvido'} R$ ${money(lost).replace('.', ',')} em ${todayISO().split('-').reverse().join('/')}`, row.id]);
+      console.log(`Pagamento ${d.id} (assinante ${subId}): ${kind}, ${money(lost)} de ${money(total)} saiu do recebido`);
+      reopened = left === 0;
+    }
+  }
+  const by = (d.refunds || []).some((r) => r.source?.type === 'collector') ? 'você (pela conta do Mercado Pago)' : kind === 'reembolso' ? 'Mercado Pago' : null;
+  await notifyPaymentIssue({
+    subscriberId: subId, kind, paymentId: d.id, totalCents: total, lostCents: lost,
+    month: row?.ref_month || (m ? `${m[2]}-${m[3]}` : null), method: row?.method || METHOD[d.payment_type_id] || null, by, reopened,
+  }).catch((e) => console.error('Aviso de reembolso/contestação:', e.message));
+  return true;
+}
+
+/** Confere um pagamento pelo número (webhook de pagamento). */
+export async function checkPaymentIssue(paymentId) {
+  return handlePaymentIssue(await mp(`/v1/payments/${enc(paymentId)}`));
+}
+
+/** Confere os pagamentos de uma referência (webhook de pedido: sub_<id>_<AAAAMM>). */
+export async function checkReferenceIssues(externalReference) {
+  if (!externalReference) return 0;
+  const r = await mp(`/v1/payments/search?external_reference=${enc(externalReference)}&limit=20`);
+  let n = 0;
+  for (const d of r.results || []) if (await handlePaymentIssue(d)) n++;
+  return n;
+}
+
+/** Varredura (não depende do webhook): pagamentos devolvidos, contestados ou em reclamação nos últimos 60 dias. */
+export async function scanPaymentIssues() {
+  if (!mpConfigured) return 0;
+  let n = 0;
+  for (const status of ['refunded', 'charged_back', 'in_mediation']) {
+    const r = await mp(`/v1/payments/search?status=${status}&sort=date_created&criteria=desc&range=date_created&begin_date=NOW-60DAYS&end_date=NOW&limit=50`);
+    for (const d of r.results || []) if (await handlePaymentIssue(d).catch((e) => { console.error('Reembolso/contestação:', e.message); return false; })) n++;
+  }
+  return n;
 }

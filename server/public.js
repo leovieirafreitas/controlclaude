@@ -7,7 +7,7 @@ import { handleIncomingMessage } from './whatsapp.js';
 import { all } from './db.js';
 import { h, getSettings, todayISO, SOLD_OUT_SQL, LICENSES_LEFT_SQL } from './routes.js';
 import { salesWindow, salesClosedMessage } from './prorata.js';
-import { mpConfigured, syncOrderId, syncAutopayNotification } from './mp.js';
+import { mpConfigured, syncOrderId, syncAutopayNotification, checkPaymentIssue, checkReferenceIssues } from './mp.js';
 
 export const publicApi = Router();
 
@@ -58,7 +58,13 @@ publicApi.post('/mp-webhook', async (req, res) => {
   res.sendStatus(200);
   if (seenRecently(`${type}:${id}`)) return;
   if (type === 'order' && /^ORD[A-Z0-9]+$/.test(id)) {
-    syncOrderId(id).catch((e) => console.error('Webhook MP:', e.message));
+    // registra o pagamento e confere se o pedido foi devolvido ou contestado
+    syncOrderId(id).then((order) => order && checkReferenceIssues(order.external_reference))
+      .catch((e) => console.error('Webhook MP:', e.message));
+  }
+  // Pagamento atualizado (reembolso, contestação, reclamação): tópico "Pagamentos" no webhook do Mercado Pago
+  if (type === 'payment' && /^\d{6,20}$/.test(id)) {
+    checkPaymentIssue(id).catch((e) => console.error('Webhook MP (pagamento):', e.message));
   }
   // Renovação automática (ative "Planos e assinaturas" no webhook do Mercado Pago)
   if ((type === 'subscription_preapproval' || type === 'subscription_authorized_payment') && /^[A-Za-z0-9-]{1,64}$/.test(id)) {

@@ -824,3 +824,42 @@ export async function notifyReactivated(subscriberId) {
     '*Libere o acesso dele no Claude de novo.*',
   ].join('\n'));
 }
+
+/**
+ * Pagamento devolvido (reembolso), contestado no banco (chargeback) ou com reclamação aberta no Mercado Pago.
+ * Avisa o admin uma vez por ocorrência (WhatsApp + push). Retorna true se avisou agora.
+ */
+export async function notifyPaymentIssue({ subscriberId, kind, paymentId, totalCents, lostCents = 0, month, method, by, reopened = false }) {
+  const ref = kind === 'reembolso' ? `${paymentId}:${lostCents}` : String(paymentId);
+  if (!(await claim(`pg_${kind}`, subscriberId, ref))) return false;
+  const s = await subscriberInfo(subscriberId).catch(() => null);
+  if (!s) return false;
+  const title = kind === 'contestacao' ? 'Pagamento contestado no banco (chargeback)'
+    : kind === 'mediacao' ? 'Reclamação aberta no Mercado Pago'
+    : lostCents >= totalCents ? 'Pagamento devolvido (reembolso)' : 'Pagamento devolvido em parte (reembolso parcial)';
+  const how = METHOD[method] || method || 'Mercado Pago';
+  firePush({ title, body: `${s.name}\n${s.plan_name} · ${brl(lostCents || totalCents)}`, tag: `pg-${kind}-${paymentId}`, url: '/admin#payments' });
+  if (!whatsappConfigured) return true;
+  const guide = kind === 'contestacao'
+    ? ['O cliente contestou a compra no banco do cartão. O Mercado Pago retira o valor do seu saldo enquanto analisa.',
+      '*Responda no Mercado Pago* (Atividade → a venda → contestação) com as provas de que o serviço foi entregue.']
+    : kind === 'mediacao'
+      ? ['O cliente abriu uma reclamação ou pedido de reembolso no Mercado Pago. O valor fica retido até resolver.',
+        '*Responda no Mercado Pago* (Atividade → a venda) dentro do prazo, senão o dinheiro volta para o cliente.']
+      : [by ? `*Devolvido por:* ${by}` : null,
+        'O valor saiu do recebido deste mês no painel.',
+        reopened ? 'A mensalidade deste mês voltou a ficar em aberto.' : null,
+        '*Se for o caso, remova o acesso dele no Claude e desative o assinante no painel.*'];
+  await notifyAdmin([
+    `*${title}*`,
+    '',
+    ...contactLines(s),
+    `*Plano:* ${s.plan_name}`,
+    kind === 'reembolso' ? `*Valor devolvido:* ${brl(lostCents)} de ${brl(totalCents)}` : `*Valor:* ${brl(totalCents)}`,
+    `*Pagamento:* ${how}${month ? ` · ${fmtMonth(month)}` : ''} · operação ${paymentId}`,
+    '',
+    ...guide,
+    nowBR(),
+  ].filter((l) => l !== null).join('\n'));
+  return true;
+}
