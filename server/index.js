@@ -7,7 +7,7 @@ import { publicApi, WA_WEBHOOK_PATH } from './public.js';
 import { memberApi } from './member.js';
 import { authProblems, logout, me, requestCode, requireAuth, verifyCode } from './auth.js';
 import { ensureIncomingWebhook, startNoticeScheduler, whatsappConfigured } from './whatsapp.js';
-import { mpConfigured, syncDueAutopays, syncPendingCheckouts } from './mp.js';
+import { mpConfigured, syncDueAutopays, syncPendingCheckouts, scanPaymentIssues } from './mp.js';
 
 // Rede de segurança: um erro inesperado é registrado no log em vez de derrubar o servidor.
 process.on('unhandledRejection', (err) => console.error('Erro não tratado:', err?.message || err));
@@ -84,6 +84,10 @@ app.listen(PORT, HOST, () => {
     };
     setTimeout(sync, 30_000).unref();
     setInterval(sync, 5 * 60_000).unref();
+    // Reembolsos, contestações e reclamações: confere de hora em hora (não depende do webhook)
+    const issues = () => scanPaymentIssues().catch((e) => console.error('Mercado Pago (reembolsos):', e.message));
+    setTimeout(issues, 90_000).unref();
+    setInterval(issues, 60 * 60_000).unref();
   }
   console.log(whatsappConfigured ? 'Avisos no WhatsApp: ligados' : 'Avisos no WhatsApp: desligados (configure EVOLUTION_* no .env)');
 });

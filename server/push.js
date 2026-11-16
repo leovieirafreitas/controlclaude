@@ -95,5 +95,6 @@ export async function sendPush(payload, { adminEmail = null } = {}) {
 
 /** Versão "dispara e esquece" para os eventos (pagamento, cadastro). */
 export function firePush(payload) {
+  if (/^(on|1|true)$/i.test(process.env.PUSH_DISABLED || '')) return; // testes locais: não manda notificação de verdade
   sendPush(payload).catch((err) => console.error('Push:', err.message));
 }
