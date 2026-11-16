@@ -3,6 +3,7 @@
 // nunca confiamos no navegador nem no corpo do webhook.
 // Os dados do cartão são tokenizados no navegador pelo SDK do Mercado Pago (Card Payment Brick);
 // o servidor só recebe o token.
+import { todayISO } from './time.js';
 import { all, get, run } from './db.js';
 import { notifyPayment, notifyUnderpaid, notifyWorkspace, notifyReactivated } from './whatsapp.js';
 import { provisionWorkspace } from './workspace.js';
@@ -119,7 +120,7 @@ async function recordOrder(order) {
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (mp_payment_id) WHERE mp_payment_id IS NOT NULL DO NOTHING`, [
     sub.id, month, Math.round(Number(pay.amount || order.total_amount) * 100),
-    new Date().toLocaleDateString('sv-SE'),
+    todayISO(),
     METHOD[pay.payment_method?.type] || 'credito', `Mercado Pago ${order.id}`, String(pay.id || order.id)]);
 
   if (r.rowCount) await activateIfPaid(sub.id, month, Math.round(Number(pay.amount || order.total_amount) * 100));
@@ -368,12 +369,12 @@ async function recordAutopayCharge(subId, invoice) {
     INSERT INTO payments (subscriber_id, ref_month, amount_cents, paid_at, method, notes, mp_payment_id)
     VALUES (?, ?, ?, ?, 'credito', ?, ?)
     ON CONFLICT (mp_payment_id) WHERE mp_payment_id IS NOT NULL DO NOTHING`,
-  [sub.id, month, amountCents, new Date().toLocaleDateString('sv-SE'), `Mercado Pago renovação automática ${ref}`, String(pay.id)]);
+  [sub.id, month, amountCents, todayISO(), `Mercado Pago renovação automática ${ref}`, String(pay.id)]);
   if (!r.rowCount) return false;
 
   await activateIfPaid(sub.id, month, amountCents); // foi cobrado: ativa se cobriu o preço do plano
   // o vencimento passa a ser o dia em que o cartão é cobrado
-  const day = Math.min(Number(new Date().toLocaleDateString('sv-SE').slice(8, 10)), 28);
+  const day = Math.min(Number(todayISO().slice(8, 10)), 28);
   if (sub.due_day !== day) await run('UPDATE subscribers SET due_day = ? WHERE id = ?', [day, sub.id]);
   notifyPayment({ subscriberId: sub.id, month, orderId: `renovação automática ${ref}`, amountCents, method: 'credito', autopay: true })
     .catch((e) => console.error('WhatsApp:', e.message));
