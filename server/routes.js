@@ -319,11 +319,11 @@ api.delete('/subscribers/:id', h(async ({ params }) => {
 api.get('/payments', h(({ query }) => {
   const where = [];
   const args = [];
-  if (query.month) { where.push('pay.ref_month = ?'); args.push(checkMonth(query.month)); }
+  if (query.month) { where.push(`${CASH_MONTH_SQL} = ?`); args.push(checkMonth(query.month)); }
   if (query.subscriber_id) { where.push('pay.subscriber_id = ?'); args.push(Number(query.subscriber_id)); }
   if (query.method) { where.push('pay.method = ?'); args.push(str(query.method)); }
   return all(`
-    SELECT pay.*, s.name AS subscriber_name, p.name AS plan_name
+    SELECT pay.*, s.name AS subscriber_name, p.name AS plan_name, ${FIRST_PAY_SQL} AS is_first
     FROM payments pay
     JOIN subscribers s ON s.id = pay.subscriber_id
     JOIN plans p ON p.id = s.plan_id
@@ -362,6 +362,11 @@ function shiftMonth(month, delta) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// 1º pagamento proporcional (pro rata) de cliente novo: na contabilidade ele quita o ciclo anterior (ref_month = mês passado),
+// mas o dinheiro entrou no mês em que foi pago. Nos relatórios, conta no mês do pagamento.
+const FIRST_PAY_SQL = `(pay.ref_month = s.first_month AND pay.ref_month < to_char(pay.paid_at, 'YYYY-MM'))`;
+const CASH_MONTH_SQL = `(CASE WHEN ${FIRST_PAY_SQL} THEN to_char(pay.paid_at, 'YYYY-MM') ELSE pay.ref_month END)`;
+
 api.get('/dashboard', h(async ({ query }) => {
   const today = todayISO();
   const currentMonth = today.slice(0, 7);
@@ -379,17 +384,23 @@ api.get('/dashboard', h(async ({ query }) => {
            CASE WHEN s.first_month = ? AND s.first_cents IS NOT NULL THEN s.first_cents ELSE COALESCE(s.monthly_cents, p.price_cents) END AS price_cents,
            COALESCE((SELECT SUM(amount_cents) FROM payments WHERE subscriber_id = s.id AND ref_month = ?), 0) AS paid_cents,
            (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS last_paid_at,
-           (SELECT string_agg(DISTINCT method, ',') FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_methods
+           (SELECT string_agg(DISTINCT method, ',') FROM payments WHERE subscriber_id = s.id AND ref_month = ?) AS paid_methods,
+           -- 1º pagamento proporcional pago neste mês (cliente novo com vencimento fixo)
+           COALESCE((SELECT SUM(amount_cents) FROM payments WHERE subscriber_id = s.id AND ref_month = s.first_month AND s.first_month < ? AND to_char(paid_at, 'YYYY-MM') = ?), 0) AS prorata_cents,
+           (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id AND ref_month = s.first_month AND s.first_month < ? AND to_char(paid_at, 'YYYY-MM') = ?) AS prorata_paid_at,
+           (SELECT string_agg(DISTINCT method, ',') FROM payments WHERE subscriber_id = s.id AND ref_month = s.first_month AND s.first_month < ? AND to_char(paid_at, 'YYYY-MM') = ?) AS prorata_methods
     FROM subscribers s JOIN plans p ON p.id = s.plan_id
     WHERE s.status = 'ativo' AND to_char(s.start_date, 'YYYY-MM') <= ? AND (s.first_month IS NULL OR s.first_month <= ?)
-    ORDER BY lower(s.name)`, [month, month, month, month, month, month]),
+    ORDER BY lower(s.name)`, [month, month, month, month, month, month, month, month, month, month, month, month]),
     all(`
-      SELECT ref_month, COALESCE(SUM(amount_cents), 0) AS total FROM payments
-      WHERE ref_month = ANY(?) GROUP BY ref_month`, [[...new Set([...months, month])]]),
+      SELECT m AS ref_month, COALESCE(SUM(amount_cents), 0) AS total FROM (
+        SELECT pay.amount_cents, ${CASH_MONTH_SQL} AS m FROM payments pay LEFT JOIN subscribers s ON s.id = pay.subscriber_id) t
+      WHERE m = ANY(?) GROUP BY m`, [[...new Set([...months, month])]]),
     all(`
-      SELECT method, COUNT(*) AS count, SUM(amount_cents) AS total_cents,
-             COUNT(*) FILTER (WHERE mp_payment_id IS NOT NULL) AS online
-      FROM payments WHERE ref_month = ? GROUP BY method ORDER BY SUM(amount_cents) DESC`, [month]),
+      SELECT pay.method, COUNT(*) AS count, SUM(pay.amount_cents) AS total_cents,
+             COUNT(*) FILTER (WHERE pay.mp_payment_id IS NOT NULL) AS online
+      FROM payments pay LEFT JOIN subscribers s ON s.id = pay.subscriber_id
+      WHERE ${CASH_MONTH_SQL} = ? GROUP BY pay.method ORDER BY SUM(pay.amount_cents) DESC`, [month]),
     all(`
       SELECT p.name, p.price_cents, COUNT(s.id) AS subscribers
       FROM plans p LEFT JOIN subscribers s ON s.plan_id = p.id AND s.status = 'ativo'
@@ -400,8 +411,9 @@ api.get('/dashboard', h(async ({ query }) => {
   let expected = 0, coveredReceived = 0, paidCount = 0, overdueCount = 0;
   for (const s of subs) {
     const duePassed = isPast || (isCurrent && todayDay > Math.min(s.due_day, lastDayOfMonth)); // dia 30 em fevereiro: último dia
-    expected += s.price_cents;
-    coveredReceived += Math.min(s.paid_cents, s.price_cents);
+    // o proporcional pago neste mês entra no previsto e no recebido (é dinheiro deste mês, além da mensalidade)
+    expected += s.price_cents + s.prorata_cents;
+    coveredReceived += Math.min(s.paid_cents, s.price_cents) + s.prorata_cents;
     if (s.paid_cents >= s.price_cents) { s.pay_status = 'pago'; paidCount++; }
     else if (s.paid_cents > 0) s.pay_status = 'parcial';
     else s.pay_status = duePassed ? 'atrasado' : 'pendente';
