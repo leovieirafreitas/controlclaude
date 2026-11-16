@@ -61,9 +61,9 @@ function renderRows() {
     <tr>
       <td><strong>${esc(s.name)}</strong><div class="muted">${esc(s.phone || s.email)}</div></td>
       <td>${esc(s.plan_name)}</td>
-      <td class="num">${brl(s.price_cents)}</td>
+      <td class="num">${brl(s.price_cents)}${s.prorata_cents ? `<div class="muted" title="1º pagamento proporcional, pago neste mês">+ ${brl(s.prorata_cents)} proporcional</div>` : ''}</td>
       <td>${String(Math.min(s.due_day, new Date(Number(data.month.slice(0, 4)), Number(data.month.slice(5, 7)), 0).getDate())).padStart(2, '0')}/${month}</td>
-      <td class="num">${s.paid_cents ? `${brl(s.paid_cents)}<div class="muted">${fmtDate(s.last_paid_at)} · ${(s.paid_methods || '').split(',').filter(Boolean).map(methodInline).join(' + ')}</div>` : '—'}</td>
+      <td class="num">${s.paid_cents ? `${brl(s.paid_cents)}<div class="muted">${fmtDate(s.last_paid_at)} · ${(s.paid_methods || '').split(',').filter(Boolean).map(methodInline).join(' + ')}</div>` : s.prorata_cents ? '' : '—'}${s.prorata_cents ? `<div>${brl(s.prorata_cents)}</div><div class="muted">${fmtDate(s.prorata_paid_at)} · ${(s.prorata_methods || '').split(',').filter(Boolean).map(methodInline).join(' + ')} · proporcional</div>` : ''}</td>
       <td>${badge(s.pay_status)}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
       <td>${s.pay_status !== 'pago' ? `<button class="btn small primary" data-quickpay="${s.id}">Marcar pago</button>` : ''}</td>
     </tr>`).join('')
