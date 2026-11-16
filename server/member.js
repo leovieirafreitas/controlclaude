@@ -7,7 +7,7 @@
 // Esqueci a senha: código por e-mail (Resend) + nova senha.
 import { Router } from 'express';
 import { all, get, run } from './db.js';
-import { firstCharge, prorataConfig, dueDate, currentCycle, shiftMonth } from './prorata.js';
+import { firstCharge, prorataConfig, dueDate, currentCycle, shiftMonth, salesWindowToday, salesClosedMessage } from './prorata.js';
 import { ApiError, h, str, todayISO, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL, planSoldOut, checkSeats } from './routes.js';
 import { EMAIL_RE, OtpSilentError, checkCode, issueCode, makeSession, normEmail } from './otp.js';
 import { checkPasswordRules, hashPassword, verifyPassword } from './password.js';
@@ -137,6 +137,14 @@ export async function chargeFor(sub, monthlyCents) {
     return { month, cents, first: true };
   }
   return { month: await billingMonth(sub, monthlyCents), cents: monthlyCents, first: false };
+}
+
+/** Janela de vendas: cliente que nunca pagou só assina/paga do dia 1 ao dia de fechamento. Quem já pagou passa sempre. */
+async function assertSalesOpen(subId) {
+  const w = await salesWindowToday(todayISO());
+  if (w.open) return;
+  if (subId && await get('SELECT 1 AS x FROM payments WHERE subscriber_id = ? LIMIT 1', [subId])) return;
+  throw new ApiError(409, salesClosedMessage(w));
 }
 
 async function currentCustomer(req) {
@@ -326,7 +334,7 @@ memberApi.put('/password', h(async (req) => {
  */
 async function memberViewByEmail(email) {
   const month = todayISO().slice(0, 7);
-  const [customer, sub, plans, payments] = await Promise.all([
+  const [customer, sub, plans, payments, sales] = await Promise.all([
     customerByEmail(email),
     get(`
       SELECT s.*, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, p.description AS plan_description, ${SOLD_OUT_SQL} AS plan_sold_out,
@@ -346,6 +354,7 @@ async function memberViewByEmail(email) {
         SELECT s.id FROM subscribers s JOIN customers c ON c.id = s.customer_id
         WHERE c.email = ? ORDER BY s.id DESC LIMIT 1)
       ORDER BY pay.paid_at DESC, pay.id DESC LIMIT 24`, [email]),
+    salesWindowToday(todayISO()),
   ]);
   if (!customer) throw new ApiError(401, 'Não autenticado');
 
@@ -389,6 +398,8 @@ async function memberViewByEmail(email) {
     card_once: CARD_ONCE_ENABLED,
     card_subscription: CARD_SUBSCRIPTION,
     mp_public_key: mpConfigured ? MP_PUBLIC_KEY : null,
+    // janela de vendas: fechada só barra quem nunca pagou
+    sales: { open: sales.open || (sub ? payments.length > 0 : false), close_day: sales.close_day, opens_label: sales.opens_label, message: sales.open ? '' : salesClosedMessage(sales) },
   };
 }
 
@@ -421,6 +432,7 @@ memberApi.post('/subscribe', h(async (req) => {
   if (!plan) throw new ApiError(400, 'Plano indisponível. Escolha outro plano.');
 
   const sub = await subscriptionOf(c.id);
+  await assertSalesOpen(sub?.id);
   if (sub && sub.status === 'ativo' && sub.plan_id !== plan.id) {
     throw new ApiError(409, 'Você já tem um plano ativo. Para trocar de plano, fale com o suporte.');
   }
@@ -485,6 +497,7 @@ memberApi.post('/pay', h(mpSafe(async (req) => {
   if (req.body?.method === 'pix' && !PIX_ENABLED) throw new ApiError(400, 'O pagamento é só por cartão de crédito, com renovação automática.');
   const c = await currentCustomer(req);
   const sub = await requireSubscription(c);
+  await assertSalesOpen(sub.id);
   // Limite de tentativas de pagamento por cliente (cada uma cria um pedido no Mercado Pago)
   const tries = await get(`SELECT COUNT(*) FILTER (WHERE created_at > now() - interval '1 hour') AS h, COUNT(*) AS d
     FROM checkouts WHERE subscriber_id = ? AND created_at > now() - interval '1 day'`, [sub.id]);
@@ -573,6 +586,7 @@ memberApi.post('/autopay-link', h(mpSafe(async (req) => {
   if (!CARD_ENABLED) throw new ApiError(400, 'O pagamento é por Pix.');
   const c = await currentCustomer(req);
   const sub = await requireSubscription(c);
+  await assertSalesOpen(sub.id);
   const plan = pricedPlan(await get('SELECT * FROM plans WHERE id = ?', [sub.plan_id]), sub);
   if (!plan.active && sub.status !== 'ativo') throw new ApiError(400, 'Este plano não está mais disponível. Escolha outro plano.');
   if (!HOLDS_LICENSE.includes(sub.status) && await planSoldOut(plan.id, sub.seats)) throw new ApiError(409, SOLD_OUT_MSG);

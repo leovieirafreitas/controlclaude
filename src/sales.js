@@ -21,8 +21,8 @@ function spots(p) {
 
 let lastPlans = '';
 
-function renderPlans(plans) {
-  const key = JSON.stringify(plans);
+function renderPlans(plans, sales = { open: true }) {
+  const key = JSON.stringify([plans, sales]);
   if (key === lastPlans) return; // nada mudou: não redesenha
   lastPlans = key;
   const box = $('#plans');
@@ -31,6 +31,9 @@ function renderPlans(plans) {
     return;
   }
   box.classList.toggle('single', plans.length === 1);
+  const notice = $('#sales-closed');
+  notice.textContent = sales.open ? '' : sales.message;
+  notice.classList.toggle('hidden', sales.open);
   box.innerHTML = plans.map((p) => {
     const [reais, cents] = (p.price_cents / 100).toFixed(2).split('.');
     const features = String(p.features || '').split('\n').map((f) => f.trim()).filter(Boolean);
@@ -47,6 +50,7 @@ function renderPlans(plans) {
         ${features.length ? `<ul class="features">${features.map((f) => `<li>${CHECK}<span>${esc(f)}</span></li>`).join('')}</ul>` : '<div class="spacer"></div>'}
         ${p.sold_out
     ? '<button class="btn btn-outline btn-lg btn-block" disabled>Esgotado</button>'
+    : !sales.open ? `<button class="btn btn-outline btn-lg btn-block" disabled>Abre em ${esc(sales.opens_label)}</button>`
     : `<a class="btn ${p.featured ? 'btn-primary' : 'btn-outline'} btn-lg btn-block" href="/conta?plano=${p.id}">Assinar ${esc(p.name)}</a>`}
       </article>`;
   }).join('');
@@ -79,7 +83,7 @@ const loadInfo = () => fetch('/api/public/info', { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : Promise.reject()))
   .then((data) => {
     applySettings(data.settings);
-    renderPlans(data.plans);
+    renderPlans(data.plans, data.sales);
   });
 
 loadInfo().catch(() => {

@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import { hmac } from './otp.js';
 import { handleIncomingMessage } from './whatsapp.js';
 import { all } from './db.js';
-import { h, getSettings, SOLD_OUT_SQL, LICENSES_LEFT_SQL } from './routes.js';
+import { h, getSettings, todayISO, SOLD_OUT_SQL, LICENSES_LEFT_SQL } from './routes.js';
+import { salesWindow, salesClosedMessage } from './prorata.js';
 import { mpConfigured, syncOrderId, syncAutopayNotification } from './mp.js';
 
 export const publicApi = Router();
@@ -16,7 +17,8 @@ publicApi.get('/info', h(async () => {
     all(`SELECT p.id, p.name, p.price_cents, p.description, p.features, p.featured, p.max_seats, ${SOLD_OUT_SQL} AS sold_out, ${LICENSES_LEFT_SQL} AS licenses_left
          FROM plans p WHERE p.active ORDER BY p.price_cents ASC`),
   ]);
-  return { settings, plans, online_payment: mpConfigured };
+  const w = salesWindow(todayISO(), settings);
+  return { settings, plans, online_payment: mpConfigured, sales: { open: w.open, close_day: w.close_day, opens_label: w.opens_label, message: w.open ? '' : salesClosedMessage(w) } };
 }));
 
 // Notificações do Mercado Pago (só chegam quando o site está publicado com HTTPS).

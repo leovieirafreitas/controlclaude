@@ -96,6 +96,10 @@ async function showChosenPlan() {
     clearPending();
     return flash(`O plano ${plan.name} está esgotado no momento. Escolha outro plano.`, 'bad');
   }
+  if (info.sales && !info.sales.open) {
+    clearPending();
+    return flash(info.sales.message, 'bad');
+  }
   const box = $('#chosen-plan');
   box.innerHTML = `<span>Plano escolhido</span><strong>${esc(plan.name)}</strong><em>${brl(plan.price_cents)}/mês</em>`;
   box.classList.remove('hidden');
@@ -285,7 +289,7 @@ function dueDateOf(month, dueDay) {
 /** A mensalidade em cobrança ainda não venceu? */
 const notDueYet = (sub) => dueDateOf(sub.next_charge.month, sub.due_day) >= new Date().toLocaleDateString('sv-SE');
 
-function renderPlanChoices(plans, currentId) {
+function renderPlanChoices(plans, currentId, sales = { open: true }) {
   $('#mini-plans').innerHTML = plans.map((p) => `
     <div class="mini-plan ${p.featured ? 'featured' : ''}">
       <div><strong>${esc(p.name)}</strong>${p.description ? `<span class="muted">${esc(p.description)}</span>` : ''}${p.max_seats > 1 ? `<span class="muted seats-note">Preço por vaga · até ${p.max_seats} vagas</span>` : ''}</div>
@@ -293,6 +297,7 @@ function renderPlanChoices(plans, currentId) {
         <span class="mini-price">${brl(p.price_cents)}<small>/mês</small></span>
         ${p.sold_out
     ? '<button class="btn btn-outline" disabled>Esgotado</button>'
+    : !sales.open ? `<button class="btn btn-outline" disabled>Abre em ${esc(sales.opens_label)}</button>`
     : `<button class="btn ${p.featured ? 'btn-primary' : 'btn-outline'}" data-plan="${p.id}">${p.id === currentId ? 'Pagar este plano' : 'Assinar'}</button>`}
       </div>
     </div>`).join('') || '<p class="muted">Nenhum plano disponível no momento.</p>';
@@ -314,7 +319,10 @@ function render(data) {
   $('#sub-card').classList.toggle('hidden', !sub);
   $('#choose').classList.toggle('hidden', Boolean(sub));
   $('#choose-title').textContent = 'Escolha seu plano';
-  renderPlanChoices(plans, sub?.plan.id);
+  const sales = data.sales || { open: true };
+  renderPlanChoices(plans, sub?.plan.id, sales);
+  $('#choose-closed').textContent = sales.open ? '' : sales.message;
+  $('#choose-closed').classList.toggle('hidden', sales.open);
 
   if (sub) {
     const cancelled = sub.status === 'cancelado';
@@ -345,7 +353,7 @@ function render(data) {
     $('#card-btn').classList.toggle('hidden', !ap || cancelled);
     $('#due').textContent = apOn && nextDate ? `Próxima cobrança em ${nextDate}` : `Todo dia ${sub.due_day}`;
 
-    const showPay = can_pay && !scheduled && !sub.plan.sold_out && (!apOn || failed);
+    const showPay = can_pay && !scheduled && !sub.plan.sold_out && sales.open && (!apOn || failed);
     $('#pay-btn').classList.toggle('hidden', !showPay);
     $('#check-btn').classList.toggle('hidden', !can_pay || scheduled || (active && next.current_paid));
     $('#pay-btn').textContent = sub.first_charge ? `Pagar ${brl(sub.first_charge.cents)}`
@@ -361,6 +369,7 @@ function render(data) {
         ? (state.card_subscription ? 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp. Se quiser, ative a renovação automática no cartão ao pagar a próxima.'
           : 'Sua mensalidade deste mês está paga. Perto do próximo vencimento avisamos você pelo WhatsApp.')
         : sub.status === 'pausado' ? `Seu plano está desativado por falta de pagamento. Pague a mensalidade de ${fmtMonth(next.month)} para reativar: o plano volta assim que o pagamento for confirmado.`
+        : !sales.open ? sales.message
         : sub.plan.sold_out ? `O plano ${sub.plan.name} está esgotado no momento. Escolha outro plano ou fale com o suporte.`
         : sub.first_charge ? firstChargeNote(sub).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
         : active && notDueYet(sub) ? `Próxima mensalidade (${fmtMonth(next.month)}): ${brl(sub.plan.price_cents)}, vence em ${fmtDate(dueDateOf(next.month, sub.due_day))}. Você já pode pagar${!state.card_enabled ? ' por Pix' : state.pix_enabled ? ' com cartão de crédito ou Pix' : ' no cartão de crédito'}.`
