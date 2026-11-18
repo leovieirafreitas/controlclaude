@@ -280,6 +280,20 @@ export async function notifyWorkspace({ ok, subscriberId, email, password, error
     ].join('\n'));
 }
 
+/**
+ * Entrou na lista de espera: push para o admin e WhatsApp para a pessoa com o link do grupo.
+ * Retorna { sent, error } (error explica por que não saiu, para mostrar no painel).
+ */
+export async function notifyWaitlist({ name, email, phone }, groupUrl) {
+  fire(pushEvent('push_lista_espera', { cliente: name || '', email: email || '', telefone: phone || '' }, `espera-${email}`));
+  const text = await waText('wa_lista_espera', { nome: firstName(name), cliente: name || '', grupo: groupUrl });
+  if (!text) return { sent: false, error: 'mensagem desligada no painel (WhatsApp → Mensagens)' };
+  if (!canSend) return { sent: false, error: 'WhatsApp não configurado' };
+  if (!CUSTOMER_ON) return { sent: false, error: 'mensagens para clientes desligadas (WHATSAPP_CUSTOMER_MESSAGES=off)' };
+  if (!toWhatsNumber(phone)) return { sent: false, error: 'número de WhatsApp inválido' };
+  return (await notifyCustomer(phone, text)) ? { sent: true, error: null } : { sent: false, error: 'falha no envio pelo WhatsApp' };
+}
+
 /** Cliente criou a conta (ainda sem pagar). */
 export function notifySignup({ name, email, phone, birth_date }) {
   pushEvent('push_cadastro', { cliente: name || '', email: email || '', telefone: phone || '' }, `cadastro-${email}`);

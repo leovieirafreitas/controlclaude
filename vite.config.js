@@ -9,7 +9,8 @@ const salesRoute = {
   configureServer(server) {
     server.middlewares.use((req, res, next) => {
       if (req.url === '/admin' || req.url.startsWith('/admin?')) req.url = req.url.replace('/admin', '/index.html');
-      for (const page of ['/assinar', '/conta', '/termos', '/privacidade']) {
+      if (req.url === '/lista-de-espera' || req.url.startsWith('/lista-de-espera?')) req.url = req.url.replace('/lista-de-espera', '/espera');
+      for (const page of ['/assinar', '/conta', '/espera', '/termos', '/privacidade']) {
         if (req.url === page || req.url.startsWith(`${page}?`)) req.url = req.url.replace(page, `${page}.html`);
       }
       next();
@@ -31,6 +32,7 @@ export default defineConfig({
         main: resolve(import.meta.dirname, 'index.html'),
         assinar: resolve(import.meta.dirname, 'assinar.html'),
         conta: resolve(import.meta.dirname, 'conta.html'),
+        espera: resolve(import.meta.dirname, 'espera.html'),
         termos: resolve(import.meta.dirname, 'termos.html'),
         privacidade: resolve(import.meta.dirname, 'privacidade.html'),
       },

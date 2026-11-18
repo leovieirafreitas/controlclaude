@@ -3,6 +3,7 @@ import { $ } from './utils.js';
 import { initDashboard, loadDashboard } from './views/dashboard.js';
 import { initSubscribers, loadSubscribers } from './views/subscribers.js';
 import { initCustomers, loadCustomers, refreshCustomersDot } from './views/customers.js';
+import { initWaitlist, loadWaitlist, refreshWaitlistDot } from './views/waitlist.js';
 import { initPayments, loadPayments } from './views/payments.js';
 import { initPlans, loadPlans } from './views/plans.js';
 import { initWhatsapp, loadWhatsapp, refreshWhatsappDot, resetPacingDraft } from './views/whatsapp.js';
@@ -16,6 +17,7 @@ enhanceControls(); // listas e calendários com o visual do site
 const loaders = {
   dashboard: loadDashboard,
   customers: loadCustomers,
+  waitlist: loadWaitlist,
   subscribers: loadSubscribers,
   payments: loadPayments,
   plans: loadPlans,
@@ -65,6 +67,7 @@ function showApp(email) {
   showTab(currentTab);
   if (currentTab !== 'whatsapp') refreshWhatsappDot();
   if (currentTab !== 'customers') refreshCustomersDot();
+  if (currentTab !== 'waitlist') refreshWaitlistDot();
   refreshPush();
 }
 
@@ -181,6 +184,7 @@ $('#logout').addEventListener('click', async () => {
 
 initDashboard();
 initCustomers();
+initWaitlist();
 initSubscribers(refresh);
 initAdminPix();
 initPayments(refresh);
@@ -192,6 +196,8 @@ setInterval(() => {
   if ($('#app').classList.contains('hidden') || document.hidden) return;
   if (currentTab === 'customers') loadCustomers().catch(() => {});
   else refreshCustomersDot();
+  if (currentTab === 'waitlist') loadWaitlist().catch(() => {});
+  else refreshWaitlistDot();
 }, 30_000);
 
 // ---------- início

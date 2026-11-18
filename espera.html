@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control Claude · Lista de espera</title>
+  <meta name="description" content="Entre na lista de espera da Control Claude e seja avisado(a) primeiro quando abrirem novas vagas.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="./src/sales.css">
+  <link rel="stylesheet" href="./src/conta.css">
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a href="/assinar" class="brand"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></a>
+      <nav class="nav-links">
+        <a href="/assinar">Planos</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap account">
+    <section class="auth-card">
+      <!-- formulário -->
+      <form id="wait-form" class="pane" novalidate>
+        <h1>Lista de espera</h1>
+        <p class="muted">Deixe seus dados e enviamos no seu WhatsApp o link do nosso grupo. Lá você fica sabendo primeiro quando abrirem novas vagas.</p>
+        <label>Nome completo<input name="name" autocomplete="name" required maxlength="120"></label>
+        <label>E-mail<input name="email" type="email" autocomplete="email" required maxlength="160"></label>
+        <label>WhatsApp (com DDD)<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" placeholder="(92) 91234-5678" required></label>
+        <label class="hp" aria-hidden="true">Site<input name="website" tabindex="-1" autocomplete="off"></label>
+        <p class="form-error hidden" role="alert"></p>
+        <button class="btn btn-primary btn-lg btn-block">Entrar na lista de espera</button>
+        <p class="muted small">Usamos seus dados só para falar com você sobre as vagas. Veja a <a href="/privacidade">Política de privacidade</a>.</p>
+      </form>
+
+      <!-- pronto -->
+      <div id="wait-done" class="pane hidden" role="status">
+        <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg></div>
+        <h2 class="center-text">Você está na lista!</h2>
+        <p class="muted center-text" id="wait-msg"></p>
+        <a class="btn btn-primary btn-lg btn-block hidden" id="wait-group" target="_blank" rel="noopener">Entrar no grupo do WhatsApp</a>
+        <a class="btn btn-outline btn-lg btn-block" href="/assinar">Ver os planos</a>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./src/espera.js"></script>
+</body>
+</html>

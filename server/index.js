@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { api } from './routes.js';
 import { publicApi, WA_WEBHOOK_PATH } from './public.js';
 import { memberApi } from './member.js';
+import { joinWaitlist, waitlistApi } from './waitlist.js';
 import { authProblems, logout, me, requestCode, requireAuth, verifyCode } from './auth.js';
 import { ensureIncomingWebhook, startNoticeScheduler, whatsappConfigured } from './whatsapp.js';
 import { mpConfigured, syncDueAutopays, syncPendingCheckouts, scanPaymentIssues } from './mp.js';
@@ -39,12 +40,14 @@ app.use((req, res, next) => {
   next();
 });
 
+app.post('/api/public/waitlist', joinWaitlist); // lista de espera (página /espera)
 app.use('/api/public', publicApi);
 app.use('/api/member', memberApi);
 app.post('/api/login/code', requestCode);
 app.post('/api/login/verify', verifyCode);
 app.post('/api/logout', logout);
 app.get('/api/me', me);
+app.use('/api/waitlist', requireAuth, waitlistApi);
 app.use('/api', requireAuth, api);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
 
@@ -61,15 +64,24 @@ if (fs.existsSync(DIST)) {
   app.get('/', page('assinar.html'));
   app.get('/assinar', page('assinar.html'));
   app.get('/conta', page('conta.html'));
+  app.get(['/espera', '/lista-de-espera'], page('espera.html'));
   app.get('/termos', page('termos.html'));
   app.get('/privacidade', page('privacidade.html'));
   app.get(['/admin', '/admin/{*path}'], page('index.html'));
   app.get('/{*path}', page('assinar.html'));
 }
 
+// BACKGROUND_JOBS=off: não liga as rotinas automáticas (lembretes e atrasos no WhatsApp, pausa por atraso,
+// conferência do Mercado Pago). Use no computador local ligado ao banco de produção, para não rodar em dobro com a VPS.
+const BACKGROUND_JOBS = !/^(off|0|false|nao|não)$/i.test(process.env.BACKGROUND_JOBS || 'on');
+
 app.listen(PORT, HOST, () => {
   if (authProblems.length) console.warn(`AVISO: login do painel desativado (${authProblems.join(', ')}). Configure o arquivo .env.`);
   console.log(`API rodando em http://${HOST}:${PORT}`);
+  if (!BACKGROUND_JOBS) {
+    console.log('Rotinas automáticas: DESLIGADAS (BACKGROUND_JOBS=off). Só responde às telas.');
+    return;
+  }
   startNoticeScheduler();
   // Em produção (APP_URL com https), a Evolution passa a avisar as mensagens recebidas (respostas SIM/NÃO)
   const appUrl = (process.env.APP_URL || '').replace(/\/$/, '');
