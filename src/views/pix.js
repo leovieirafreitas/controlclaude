@@ -15,9 +15,17 @@ const ICON_CHECK = '<svg class="ui-icon" viewBox="0 0 24 24" width="18" height="
 const fmtMonth = (m) => `${m.slice(5, 7)}/${m.slice(0, 4)}`;
 const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 
-/** Número com DDI para o link do WhatsApp (Brasil = 55). */
+/** Número para o link do WhatsApp: sem "+" é do Brasil (55); com "+" é internacional, como foi digitado. */
 function waNumber(phone) {
-  let d = String(phone || '').replace(/\D/g, '').replace(/^0+/, '');
+  const raw = String(phone || '').trim();
+  let d = raw.replace(/\D/g, '');
+  if (/^(\+|00)/.test(raw)) {
+    d = d.replace(/^00/, '');
+    if (d.length < 8 || d.length > 15) return '';
+    if (d.length === 11 && d[2] === '9' && !d.startsWith('55') && Number(d.slice(0, 2)) >= 11) return `55${d}`; // "+" na frente do DDD
+    return d;
+  }
+  d = d.replace(/^0+/, '');
   if (d.length === 10 || d.length === 11) d = `55${d}`;
   return d.length >= 12 && d.length <= 13 ? d : '';
 }

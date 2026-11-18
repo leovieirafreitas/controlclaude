@@ -37,11 +37,34 @@ const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 const accountLink = () => (APP_URL ? `${APP_URL}/conta` : '');
 const METHOD = { pix: 'Pix', credito: 'Cartão de crédito', debito: 'Cartão de débito', boleto: 'Boleto', dinheiro: 'Dinheiro', transferencia: 'Transferência' };
 
-/** Telefone digitado pelo cliente → número do WhatsApp com DDI (Brasil = 55). */
-function toWhatsNumber(phone) {
-  let d = String(phone || '').replace(/\D/g, '').replace(/^0+/, '');
+/**
+ * Telefone digitado pelo cliente → números de WhatsApp possíveis, do mais provável ao menos provável.
+ *  - sem "+": número do Brasil (coloca o 55);
+ *  - com "+" (ou 00) na frente: número internacional completo, com o código do país (ex.: +1 239 878-0223 é dos EUA).
+ *    Como tem gente que digita "+" na frente do DDD, se o tamanho for de número brasileiro tenta também com o 55.
+ */
+export function whatsCandidates(phone) {
+  const raw = String(phone || '').trim();
+  let d = raw.replace(/\D/g, '');
+  if (/^(\+|00)/.test(raw)) {
+    d = d.replace(/^00/, '');
+    if (d.length < 8 || d.length > 15) return [];
+    if (d.startsWith('55') && (d.length === 12 || d.length === 13)) return [d]; // +55: já é do Brasil
+    if (d.length !== 10 && d.length !== 11) return [d];
+    // tamanho de número brasileiro: celular do Brasil (DDD + 9...) vai primeiro com o 55; senão, primeiro como internacional
+    const brMobile = d.length === 11 && d[2] === '9' && Number(d.slice(0, 2)) >= 11;
+    return brMobile ? [`55${d}`, d] : [d, `55${d}`];
+  }
+  d = d.replace(/^0+/, '');
   if (d.length === 10 || d.length === 11) d = `55${d}`;
-  return d.length >= 12 && d.length <= 13 ? d : '';
+  return d.length >= 12 && d.length <= 13 ? [d] : [];
+}
+const toWhatsNumber = (phone) => whatsCandidates(phone)[0] || '';
+
+/** Envia para o primeiro número possível que o WhatsApp aceitar. */
+async function sendToPhone(phone, text) {
+  for (const number of whatsCandidates(phone)) if (await send(number, text)) return true;
+  return false;
 }
 
 async function send(number, text) {
@@ -69,16 +92,14 @@ export async function notifyAdmin(text) {
 /** Envia um texto para o cliente (se ele informou WhatsApp). Retorna true se enviou. */
 export async function notifyCustomer(phone, text, { force = false } = {}) {
   if (!canSend || (!CUSTOMER_ON && !force)) return false;
-  const number = toWhatsNumber(phone);
-  return number ? send(number, text) : false;
+  return sendToPhone(phone, text);
 }
 
 /** Código de segurança pelo WhatsApp (recuperar senha do cliente ou entrar no painel). Lança erro se não enviar. */
 export async function sendCodeWhatsapp(phone, code, purpose = 'reset') {
   if (!canSend) throw new Error('WhatsApp não configurado');
-  const number = toWhatsNumber(phone);
-  if (!number) throw new Error('cliente sem WhatsApp válido');
-  const ok = await send(number, [
+  if (!toWhatsNumber(phone)) throw new Error('cliente sem WhatsApp válido');
+  const ok = await sendToPhone(phone, [
     '🔐 *Control Claude*',
     '',
     purpose === 'admin' ? `Seu código para entrar no *painel admin* é: *${code}*` : `Seu código para criar uma nova senha é: *${code}*`,

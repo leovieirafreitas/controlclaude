@@ -19,9 +19,22 @@ function setSeen(iso) {
   try { if (iso) localStorage.setItem(SEEN_KEY, iso); } catch { /* sem armazenamento: só não guarda */ }
 }
 
+/** Número para o link do WhatsApp: sem "+" é do Brasil (55); com "+" é internacional, como foi digitado. */
+function waNumber(phone) {
+  const raw = String(phone || '').trim();
+  let d = raw.replace(/\D/g, '');
+  if (/^(\+|00)/.test(raw)) {
+    d = d.replace(/^00/, '');
+    if (d.length < 8 || d.length > 15) return '';
+    if (d.length === 11 && d[2] === '9' && !d.startsWith('55') && Number(d.slice(0, 2)) >= 11) return `55${d}`; // "+" na frente do DDD
+    return d;
+  }
+  d = d.replace(/^0+/, '');
+  if (d.length === 10 || d.length === 11) d = `55${d}`;
+  return d.length >= 12 && d.length <= 13 ? d : '';
+}
 function waLink(phone) {
-  let n = String(phone || '').replace(/\D/g, '');
-  if (n.length === 10 || n.length === 11) n = `55${n}`;
+  const n = waNumber(phone);
   return n ? `https://wa.me/${n}` : '';
 }
 
