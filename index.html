@@ -55,6 +55,7 @@
       <nav id="tabs" class="side-nav" aria-label="Menu do painel">
         <button data-tab="dashboard" class="active"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Dashboard</span></button>
         <button data-tab="customers"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Clientes</span><span class="new-dot hidden" id="cust-dot"></span></button>
+        <button data-tab="waitlist"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Lista de espera</span><span class="new-dot hidden" id="wait-dot"></span></button>
         <button data-tab="subscribers"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg><span>Assinantes</span></button>
         <button data-tab="payments"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/><path d="M6.5 15h4"/></svg><span>Pagamentos</span></button>
         <button data-tab="plans"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span>Planos</span></button>
@@ -124,6 +125,40 @@
           <table>
             <thead><tr><th>Cliente</th><th>Contato</th><th>Cadastro</th><th>E-mail</th><th>Plano</th><th>Situação</th></tr></thead>
             <tbody id="cust-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- LISTA DE ESPERA -->
+      <section id="tab-waitlist" class="hidden">
+        <div class="toolbar">
+          <h2>Lista de espera</h2>
+          <div class="filters">
+            <input type="search" id="wait-search" placeholder="Buscar nome, e-mail, telefone">
+            <button class="btn" id="wait-copy-phones" type="button">Copiar números</button>
+          </div>
+        </div>
+
+        <form id="wait-settings" class="card settings">
+          <div class="settings-head">
+            <div>
+              <h3>Links</h3>
+              <p class="muted">Quem se cadastra recebe no WhatsApp a mensagem com o link do grupo. O texto pode ser mudado em WhatsApp → Mensagens → Lista de espera.</p>
+            </div>
+            <button class="btn primary">Salvar</button>
+          </div>
+          <label>Link de cadastro (mande para os clientes)
+            <span class="copy-row"><input id="wait-signup-url" readonly><button class="btn" type="button" id="wait-copy-url">Copiar</button><a class="btn" id="wait-open-url" target="_blank" rel="noopener">Abrir</a></span>
+          </label>
+          <label>Link do grupo do WhatsApp<input name="group_url" type="url" placeholder="https://chat.whatsapp.com/..."></label>
+        </form>
+
+        <div class="kpis" id="wait-kpis"></div>
+        <p class="muted small-note">Atualiza sozinho a cada 30 segundos.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nome</th><th>Contato</th><th>Entrou em</th><th>Mensagem no WhatsApp</th><th>Situação</th><th></th></tr></thead>
+            <tbody id="wait-rows"></tbody>
           </table>
         </div>
       </section>

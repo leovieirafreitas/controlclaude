@@ -27,6 +27,7 @@ export const VARS = {
   cartao: { label: 'Final do cartão', sample: 'final 1234' },
   acesso_ate: { label: 'Último dia de acesso', sample: '10/12/2026' },
   formas_pagamento: { label: 'Formas de pagamento aceitas', sample: CARD_ON ? 'cartão de crédito ou Pix' : 'Pix' },
+  grupo: { label: 'Link do grupo da lista de espera', sample: 'https://chat.whatsapp.com/G1mvjtnV5KZ9wQk5HS44Jv' },
   link: { label: 'Link da área do assinante', sample: `${APP_URL || 'https://controlclaude.com.br'}/conta` },
 };
 
@@ -44,6 +45,8 @@ export const CATALOG = [
     on: true, vars: ['plano', 'valor', 'forma', 'cliente', 'mes'], title: 'Pagamento recebido', body: '{plano} · {valor}', url: '/admin#payments' },
   { key: 'push_cadastro', channel: 'push', group: 'Clientes', label: 'Novo cliente cadastrado', hint: 'Alguém criou a conta e confirmou o e-mail (ainda sem pagar).',
     on: true, vars: ['cliente', 'email', 'telefone'], title: 'Novo cliente cadastrado', body: '{cliente}\n{email} · {telefone}\nAinda sem pagamento', url: '/admin#customers' },
+  { key: 'push_lista_espera', channel: 'push', group: 'Clientes', label: 'Entrou na lista de espera', hint: 'Alguém se cadastrou na lista de espera (/espera).',
+    on: true, vars: ['cliente', 'email', 'telefone'], title: 'Nova pessoa na lista de espera', body: '{cliente}\n{email} · {telefone}', url: '/admin#waitlist' },
   { key: 'push_checkout', channel: 'push', group: 'Clientes', label: 'Não concluiu o pagamento (24h)', hint: 'Escolheu o plano há 24 horas e ainda não pagou.',
     on: false, vars: ['cliente', 'plano', 'valor', 'telefone'], title: 'Pagamento não concluído', body: '{cliente} escolheu o {plano} ({valor}) e ainda não pagou', url: '/admin#customers' },
   { key: 'push_cancelamento', channel: 'push', group: 'Avisos', label: 'Assinatura cancelada', hint: 'O cliente cancelou pela área do assinante.',
@@ -54,6 +57,13 @@ export const CATALOG = [
     on: false, vars: ['cliente', 'plano', 'valor', 'vencimento'], title: 'Mensalidade atrasada', body: '{cliente} · {plano} ({valor})\nVenceu em {vencimento}', url: '/admin#dashboard' },
 
   // ------------------------------------------------------------ WhatsApp para o cliente
+  { key: 'wa_lista_espera', channel: 'whatsapp', group: 'Lista de espera', label: 'Entrou na lista de espera', hint: 'Logo depois do cadastro na lista de espera (/espera). Manda o link do grupo.',
+    on: true, vars: ['nome', 'cliente', 'grupo'], body: w([
+      'Olá, {nome}! 👋', '',
+      'Você entrou na *lista de espera* da Control Claude. 🎉', '',
+      'Entre no nosso grupo do WhatsApp para ser avisado(a) primeiro quando abrirem novas vagas:',
+      '👉 {grupo}', '',
+      'Qualquer dúvida, é só responder esta mensagem.']) },
   { key: 'wa_boas_vindas', channel: 'whatsapp', group: 'Pagamento confirmado', label: 'Boas-vindas (1º pagamento)', hint: 'Primeiro pagamento por Pix ou cartão avulso.',
     on: true, vars: ['nome', 'plano', 'valor', 'forma', 'mes', 'dia_vencimento', 'link'], body: w([
       'Olá, {nome}! 🎉', '',

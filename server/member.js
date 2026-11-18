@@ -49,13 +49,13 @@ export function checkBirthDate(v) {
 /** Texto de uma linha só: sem quebras, caracteres de controle nem marcações do WhatsApp (* _ ~ `). */
 const oneLine = (v) => str(v).replace(/[\u0000-\u001F\u007F\u2028\u2029]+/g, ' ').replace(/[*_~`]/g, '').replace(/\s+/g, ' ').trim();
 
-function checkName(v) {
+export function checkName(v) {
   const s = oneLine(v);
   if (s.length < 2 || s.length > 120) throw new ApiError(400, 'Informe seu nome completo.');
   return s;
 }
 
-function checkPhone(v) {
+export function checkPhone(v) {
   const s = str(v);
   if (!s) throw new ApiError(400, 'Informe seu WhatsApp com DDD. É por ele que avisamos o vencimento.');
   if (s.replace(/\D/g, '').length < 10 || s.length > 30 || !/^[\d +().-]+$/.test(s)) throw new ApiError(400, 'WhatsApp inválido. Use DDD + número.');

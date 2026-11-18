@@ -32,7 +32,7 @@ function renderPlans(plans, sales = { open: true }) {
   }
   box.classList.toggle('single', plans.length === 1);
   const notice = $('#sales-closed');
-  notice.textContent = sales.open ? '' : sales.message;
+  notice.innerHTML = sales.open ? '' : `${esc(sales.message)} <a href="/espera">Entre na lista de espera</a> para ser avisado(a) primeiro.`;
   notice.classList.toggle('hidden', sales.open);
   box.innerHTML = plans.map((p) => {
     const [reais, cents] = (p.price_cents / 100).toFixed(2).split('.');

@@ -204,3 +204,16 @@ alter table public.subscribers add column if not exists first_cents integer chec
 -- vencimento até o dia 30 (em fevereiro, o sistema usa o último dia do mês)
 alter table public.subscribers drop constraint if exists subscribers_due_day_check;
 alter table public.subscribers add constraint subscribers_due_day_check check (due_day between 1 and 30);
+
+-- v18: lista de espera (/espera). A pessoa deixa nome, e-mail e WhatsApp e recebe no WhatsApp o link do grupo.
+-- (o servidor também cria esta tabela sozinho ao iniciar). Link do grupo em settings: waitlist_group_url.
+create table if not exists public.waitlist (
+  id bigserial primary key,
+  name text not null,
+  email text not null unique,
+  phone text not null,
+  created_at timestamptz not null default now(),
+  whatsapp_sent_at timestamptz,
+  whatsapp_error text
+);
+alter table public.waitlist enable row level security;  -- sem políticas: só o servidor acessa

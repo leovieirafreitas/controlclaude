@@ -42,6 +42,11 @@ export const api = {
 
   dashboard: (month) => request(`/dashboard?month=${encodeURIComponent(month)}`),
 
+  waitlist: () => request('/waitlist'),
+  saveWaitlistSettings: (body) => request('/waitlist/settings', { method: 'PUT', body }),
+  waitlistResend: (id) => request(`/waitlist/${id}/resend`, { method: 'POST' }),
+  waitlistDelete: (id) => request(`/waitlist/${id}`, { method: 'DELETE' }),
+
   plans: () => request('/plans'),
   savePlan: (id, body) => request(id ? `/plans/${id}` : '/plans', { method: id ? 'PUT' : 'POST', body }),
   deletePlan: (id) => request(`/plans/${id}`, { method: 'DELETE' }),

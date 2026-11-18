@@ -1,6 +1,7 @@
 .account { padding-top: 40px; padding-bottom: 80px; }
 .center { text-align: center; padding: 80px 0; }
 .small { font-size: 14px; }
+.center-text { text-align: center; }
 
 /* ---------- login */
 .auth-card {
