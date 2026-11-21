@@ -77,16 +77,35 @@
           <h2>Visão do mês</h2>
           <div class="filters">
             <input type="month" id="dash-month">
-            <select id="dash-filter">
-              <option value="">Todos</option>
-              <option value="pago">Pagos</option>
-              <option value="pendente">Pendentes</option>
-              <option value="atrasado">Atrasados</option>
-              <option value="parcial">Parciais</option>
-            </select>
           </div>
         </div>
         <div class="kpis" id="kpis"></div>
+
+        <!-- Próximos vencimentos: sempre a partir de hoje (passa para o mês seguinte) -->
+        <div class="card dash-block">
+          <div class="block-head">
+            <h3>Próximos vencimentos <span class="muted small">a partir de hoje</span></h3>
+            <span class="muted small" id="up-total"></span>
+          </div>
+          <div class="dtabs" id="up-tabs"></div>
+          <div class="due-list" id="up-list"></div>
+        </div>
+
+        <!-- Mensalidades do mês escolhido -->
+        <div class="card dash-block">
+          <div class="block-head">
+            <h3>Mensalidades de <span id="dash-month-label"></span></h3>
+            <input type="search" id="dash-search" placeholder="Buscar assinante" aria-label="Buscar assinante">
+          </div>
+          <div class="dtabs" id="dash-tabs"></div>
+          <div class="table-wrap scroll">
+            <table>
+              <thead><tr><th>Assinante</th><th>Valor</th><th>Vencimento</th><th>Pago no mês</th><th>Status</th><th></th></tr></thead>
+              <tbody id="dash-rows"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="grid2">
           <div class="card"><h3>Recebido — últimos 6 meses</h3><div class="bars" id="history"></div></div>
           <div class="card"><h3>Assinantes ativos por plano</h3><div id="by-plan"></div></div>
@@ -94,12 +113,6 @@
         <div class="card methods-card">
           <h3>Recebido por forma de pagamento <span class="muted" id="methods-month"></span></h3>
           <div id="by-method" class="methods"></div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Assinante</th><th>Plano</th><th>Valor</th><th>Vencimento</th><th>Pago no mês</th><th>Status</th><th></th></tr></thead>
-            <tbody id="dash-rows"></tbody>
-          </table>
         </div>
       </section>
 

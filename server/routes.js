@@ -27,6 +27,7 @@ export class ApiError extends Error {
 
 export { todayISO } from './time.js'; // AAAA-MM-DD no fuso do negócio (Manaus), não no do servidor
 import { todayISO } from './time.js';
+import { currentCycle, dueDate as cycleDueDate } from './prorata.js';
 
 function toCents(value) {
   const n = Number(String(value ?? '').replace(',', '.'));
@@ -368,6 +369,52 @@ function shiftMonth(month, delta) {
 const FIRST_PAY_SQL = `(pay.ref_month = s.first_month AND pay.ref_month < to_char(pay.paid_at, 'YYYY-MM'))`;
 const CASH_MONTH_SQL = `(CASE WHEN ${FIRST_PAY_SQL} THEN to_char(pay.paid_at, 'YYYY-MM') ELSE pay.ref_month END)`;
 
+/**
+ * Próximos vencimentos, contados a partir de HOJE (não dependem do mês escolhido no painel):
+ *  - assinante ativo: a próxima mensalidade ainda em aberto (pode cair no mês que vem);
+ *  - desativado por falta de pagamento: a mensalidade que ficou sem pagar.
+ * days = dias até o vencimento (negativo = já venceu).
+ */
+export async function upcomingCharges(today) {
+  const now = today.slice(0, 7);
+  const [subs, sums] = await Promise.all([
+    all(`
+      SELECT s.id, s.name, s.phone, s.email, s.status, s.due_day, s.start_date, s.first_month, s.first_cents, s.cancel_at,
+             s.autopay_status, s.card_last4, s.next_charge_date, p.name AS plan_name,
+             COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
+             (SELECT MAX(ref_month) FROM payments WHERE subscriber_id = s.id) AS last_paid_month
+      FROM subscribers s JOIN plans p ON p.id = s.plan_id
+      WHERE s.status IN ('ativo', 'pausado') AND COALESCE(s.monthly_cents, p.price_cents) > 0`),
+    all('SELECT subscriber_id, ref_month, SUM(amount_cents) AS total FROM payments GROUP BY subscriber_id, ref_month'),
+  ]);
+  const paid = new Map(sums.map((r) => [`${r.subscriber_id}|${r.ref_month}`, r.total]));
+  const sumOf = (id, m) => paid.get(`${id}|${m}`) || 0;
+  const amountFor = (s, m) => (m === s.first_month && s.first_cents != null ? Number(s.first_cents) : s.price_cents);
+
+  return subs.map((s) => {
+    let month;
+    if (s.status === 'ativo') {
+      month = currentCycle(today, s, s.price_cents, {
+        this: sumOf(s.id, now), prev: sumOf(s.id, shiftMonth(now, -1)), first: s.first_month ? sumOf(s.id, s.first_month) : 0,
+      }).month;
+    } else {
+      // desativado: a mensalidade seguinte à última paga
+      month = s.last_paid_month ? shiftMonth(s.last_paid_month, 1) : (s.first_month || String(s.start_date).slice(0, 7));
+    }
+    // meses já quitados (inclusive pagos adiantado) ficam para trás
+    for (let i = 0; i < 24 && sumOf(s.id, month) >= amountFor(s, month); i++) month = shiftMonth(month, 1);
+    const due = cycleDueDate(month, s.due_day);
+    return {
+      id: s.id, name: s.name, phone: s.phone, email: s.email, plan_name: s.plan_name, status: s.status,
+      month, due, days: Math.round((Date.parse(due) - Date.parse(today)) / 86_400_000),
+      amount_cents: amountFor(s, month), paid_cents: sumOf(s.id, month),
+      autopay_status: s.autopay_status, card_last4: s.card_last4, next_charge_date: s.next_charge_date,
+      cancel_at: s.cancel_at,
+      ends_before: Boolean(s.cancel_at && String(s.cancel_at) < due), // cancela antes do vencimento: não será cobrado
+    };
+  }).sort((a, b) => a.days - b.days || a.name.localeCompare(b.name, 'pt-BR'));
+}
+
 api.get('/dashboard', h(async ({ query }) => {
   const today = todayISO();
   const currentMonth = today.slice(0, 7);
@@ -379,7 +426,7 @@ api.get('/dashboard', h(async ({ query }) => {
   const months = Array.from({ length: 6 }, (_, i) => shiftMonth(month, i - 5));
 
   // Todas as consultas do painel em paralelo (cada ida ao banco custa ~180 ms)
-  const [subs, totals, byMethod, byPlan] = await Promise.all([all(`
+  const [upcoming, subs, totals, byMethod, byPlan] = await Promise.all([upcomingCharges(today), all(`
     SELECT s.id, s.name, s.email, s.phone, s.due_day, s.status, s.start_date, s.cancel_at, s.retention_answer,
            p.name AS plan_name,
            CASE WHEN s.first_month = ? AND s.first_cents IS NOT NULL THEN s.first_cents ELSE COALESCE(s.monthly_cents, p.price_cents) END AS price_cents,
@@ -425,6 +472,8 @@ api.get('/dashboard', h(async ({ query }) => {
 
   return {
     month,
+    today,
+    upcoming,
     kpis: {
       active_subscribers: subs.length,
       expected_cents: expected,
