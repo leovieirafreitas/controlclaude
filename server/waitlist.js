@@ -4,6 +4,7 @@
 //   PUT    /api/waitlist/settings      link do grupo
 //   POST   /api/waitlist/:id/resend    reenvia a mensagem
 //   DELETE /api/waitlist/:id           remove da lista
+// Quem assina (plano ativo) sai da lista sozinho: ver pruneWaitlist().
 import { Router } from 'express';
 import { all, get, run } from './db.js';
 import { ApiError, h, str } from './routes.js';
@@ -86,19 +87,39 @@ export const joinWaitlist = h(async (req) => {
   return { ok: true, already: Boolean(old), sent: r.sent, group_url: r.sent ? undefined : await groupUrl() };
 });
 
+/**
+ * Quem já assinou sai da lista de espera: plano ativo (ou desativado por atraso) com o mesmo e-mail ou o mesmo WhatsApp.
+ * O telefone é comparado pelos 8 últimos dígitos, para valer com ou sem 55, DDD e o 9 na frente.
+ * Roda ao abrir a lista no painel, então cobre qualquer jeito de ativar (site, Pix do painel, ativação à mão).
+ */
+export async function pruneWaitlist() {
+  const digits = (col) => `regexp_replace(coalesce(${col}, ''), '\\D', '', 'g')`;
+  const r = await run(`
+    DELETE FROM waitlist w
+    WHERE EXISTS (
+      SELECT 1 FROM subscribers s LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE s.status IN ('ativo', 'pausado') AND (
+        lower(s.email) = w.email OR lower(c.email) = w.email
+        OR (length(${digits('w.phone')}) >= 8 AND right(${digits('w.phone')}, 8) IN (right(${digits('s.phone')}, 8), right(${digits('c.phone')}, 8)))))
+    RETURNING w.name`);
+  if (r.rowCount) console.log(`Lista de espera: ${r.rowCount} saíram porque já assinaram (${r.rows.map((x) => x.name).join(', ')})`);
+  return r.rows.map((x) => x.name);
+}
+
 // ------------------------------------------------------------------ painel (montado atrás do login do admin)
 
 export const waitlistApi = Router();
 
 waitlistApi.get('/', h(async () => {
   await ready();
+  const removed = await pruneWaitlist(); // quem assinou sai da lista
   const [rows, group] = await Promise.all([all(`
     SELECT w.*, c.id AS customer_id, s.status AS sub_status
     FROM waitlist w
     LEFT JOIN customers c ON lower(c.email) = w.email
     LEFT JOIN LATERAL (SELECT status FROM subscribers WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) s ON true
     ORDER BY w.created_at DESC`), groupUrl()]);
-  return { group_url: group, rows };
+  return { group_url: group, rows, removed };
 }));
 
 waitlistApi.put('/settings', h(async (req) => {

@@ -39,7 +39,6 @@ function waLink(phone) {
 }
 
 function situation(r) {
-  if (r.sub_status === 'ativo') return '<span class="badge b-ativo">Já é assinante</span>';
   if (r.sub_status) return `<span class="badge b-aguardando">Tem conta · ${esc(r.sub_status)}</span>`;
   if (r.customer_id) return '<span class="badge b-pendente">Criou conta</span>';
   return '<span class="muted">Esperando</span>';
@@ -57,7 +56,7 @@ function render() {
     ['Na lista', rows.length],
     ['Últimos 7 dias', rows.filter((r) => new Date(r.created_at).getTime() > week).length],
     ['Mensagem enviada', rows.filter((r) => r.whatsapp_sent_at).length],
-    ['Já são assinantes', rows.filter((r) => r.sub_status === 'ativo').length],
+    ['Criaram conta', rows.filter((r) => r.customer_id).length],
   ].map(([label, value]) => `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div></div>`).join('');
 
   const q = $('#wait-search').value.toLowerCase();
@@ -77,8 +76,15 @@ function render() {
     || `<tr><td colspan="6" class="empty">${rows.length ? 'Ninguém encontrado com essa busca.' : 'Ninguém na lista de espera ainda.'}</td></tr>`;
 }
 
+/** O servidor tira da lista quem já assinou; avisa quando isso acontece. */
+function tellRemoved(data) {
+  const n = data.removed || [];
+  if (n.length) toast(n.length === 1 ? `${n[0]} assinou e saiu da lista de espera` : `${n.length} pessoas assinaram e saíram da lista de espera`);
+}
+
 export async function loadWaitlist() {
   const data = await api.waitlist();
+  tellRemoved(data);
   rows = data.rows;
   const f = $('#wait-settings');
   if (document.activeElement !== f.group_url) f.group_url.value = data.group_url;
@@ -93,6 +99,7 @@ export async function loadWaitlist() {
 export async function refreshWaitlistDot() {
   const data = await api.waitlist().catch(() => null);
   if (!data) return;
+  tellRemoved(data);
   const latest = data.rows[0]?.created_at || '';
   const seen = getSeen();
   if (!seen) return setSeen(latest); // primeira vez neste navegador: nada é "novo"
