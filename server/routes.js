@@ -484,7 +484,7 @@ api.get('/dashboard', h(async ({ query }) => {
   const months = Array.from({ length: 6 }, (_, i) => shiftMonth(month, i - 5));
 
   // Todas as consultas do painel em paralelo (cada ida ao banco custa ~180 ms)
-  const [upcoming, subs, totals, byMethod, byPlan] = await Promise.all([upcomingCharges(today), all(`
+  const [subs, totals, byMethod, byPlan] = await Promise.all([all(`
     SELECT s.id, s.name, s.email, s.phone, s.due_day, s.status, s.start_date, s.cancel_at, s.retention_answer,
            p.name AS plan_name,
            CASE WHEN s.first_month = ? AND s.first_cents IS NOT NULL THEN s.first_cents ELSE COALESCE(s.monthly_cents, p.price_cents) END AS price_cents,
@@ -530,8 +530,6 @@ api.get('/dashboard', h(async ({ query }) => {
 
   return {
     month,
-    today,
-    upcoming,
     kpis: {
       active_subscribers: subs.length,
       expected_cents: expected,

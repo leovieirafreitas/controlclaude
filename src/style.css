@@ -475,13 +475,7 @@ label.check input { width: auto; }
 .ws-line { font-size: 12.5px; color: var(--info); margin-top: 2px; }
 .ws-line.ws-error { color: var(--bad); }
 
-/* ---------- painel: blocos de pagamento (próximos vencimentos e mensalidades do mês) */
-.dash-block { margin-bottom: 20px; }
-.block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.block-head h3 { margin: 0; }
-.block-head input[type="search"] { width: min(260px, 100%); }
-
-/* abas com contagem */
+/* ---------- abas com contagem (Assinantes e Quadro) */
 .dtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .dtabs button {
   font: inherit; font-size: 13px; cursor: pointer;
@@ -495,41 +489,9 @@ label.check input { width: auto; }
 .dtabs button.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 .dtabs button.active .n { color: var(--accent-text); }
 
-/* lista de vencimentos, com rolagem própria */
-.due-list { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
-.due-item {
-  display: grid; grid-template-columns: 84px minmax(0, 1fr) auto auto auto; gap: 12px; align-items: center;
-  padding: 10px 12px; border-bottom: 1px solid var(--border);
-}
-.due-item:last-child { border-bottom: 0; }
-.due-when { display: grid; justify-items: center; padding: 6px 4px; border-radius: 8px; background: var(--bg); line-height: 1.25; }
-.due-when strong { font-variant-numeric: tabular-nums; }
-.due-when span { font-size: 12px; color: var(--muted); white-space: nowrap; }
-.due-when.tone-soon { background: var(--info-bg); }
-.due-when.tone-soon strong, .due-when.tone-soon span { color: var(--info); }
-.due-when.tone-warn { background: var(--warn-bg); }
-.due-when.tone-warn strong, .due-when.tone-warn span { color: var(--warn); }
-.due-when.tone-bad { background: var(--bad-bg); }
-.due-when.tone-bad strong, .due-when.tone-bad span { color: var(--bad); }
-.due-who { display: grid; min-width: 0; }
-.due-who strong, .due-who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.due-who span, .due-amount span { font-size: 13px; }
-.due-tags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.due-amount { display: grid; justify-items: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
-@media (max-width: 720px) {
-  .due-item { grid-template-columns: 72px minmax(0, 1fr) auto; row-gap: 8px; }
-  .due-tags { grid-column: 1 / -1; justify-content: flex-start; }
-  .due-tags:empty { display: none; }
-  .due-amount { grid-column: 1 / 3; justify-items: start; grid-auto-flow: column; gap: 8px; align-items: baseline; justify-content: start; }
-  .due-item .btn { grid-column: 3; }
-  .due-who { grid-column: 2 / -1; }
-}
-
-/* tabela das mensalidades: rola por dentro, com o cabeçalho fixo */
+/* tabela do painel: rola por dentro, com o cabeçalho fixo */
 .table-wrap.scroll { max-height: 520px; overflow: auto; }
 .table-wrap.scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); box-shadow: 0 1px 0 var(--border); }
-tr.row-done td { color: var(--muted); }
-tr.row-done td strong { font-weight: 500; }
 .txt-bad { color: var(--bad); }
 
 /* assinantes: a observação quebra linha em vez de esticar a tabela */
