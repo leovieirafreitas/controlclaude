@@ -38,7 +38,7 @@ const SITUATION = {
 function situationBadge(c) {
   const key = situation(c);
   let [cls, label] = SITUATION[key];
-  if (key === 'cancelado' && c.status === 'pausado') [cls, label] = ['b-pausado', 'Pausado'];
+  if (key === 'cancelado' && c.status === 'pausado') [cls, label] = ['b-pausado', 'Desativado'];
   let extra = '';
   if (key === 'ativo' && c.cancel_at) extra = ` <span class="badge b-aguardando">Cancela em ${fmtDate(c.cancel_at)}</span>`;
   return `<span class="badge ${cls}">${label}</span>${extra}`;

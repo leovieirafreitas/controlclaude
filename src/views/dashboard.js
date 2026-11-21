@@ -1,18 +1,11 @@
 import { api } from '../api.js';
-import { $, brl, esc, fmtDate, fmtMonth, badge, thisMonth, today, methodChip, methodInline, autopayBadge } from '../utils.js';
+import { $, brl, esc, fmtDate, fmtMonth, badge, thisMonth, today, methodChip, methodInline, autopayBadge, whenLabel, tabsHtml } from '../utils.js';
 import { openPayment } from './payments.js';
 
 let data = null;
 let upTab = null;      // aba dos próximos vencimentos (null = a mais urgente que tiver gente)
 let rowFilter = '';    // aba das mensalidades do mês: '' | falta | atrasado | pago
 
-const plural = (n) => `${n} dia${n === 1 ? '' : 's'}`;
-/** "em 5 dias", "amanhã", "hoje", "há 2 dias" */
-const whenLabel = (days) => (days === 0 ? 'hoje' : days === 1 ? 'amanhã' : days > 0 ? `em ${plural(days)}` : `há ${plural(-days)}`);
-const tabsHtml = (tabs, active) => tabs.map((t) => `
-  <button type="button" data-tab="${t.key}" class="${t.key === active ? 'active' : ''}${t.tone && t.count ? ` tone-${t.tone}` : ''}">
-    ${t.label} <span class="n">${t.count}</span>
-  </button>`).join('');
 const shortDate = (iso) => fmtDate(iso).slice(0, 5); // dd/mm
 const plain = (v) => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 

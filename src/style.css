@@ -531,3 +531,6 @@ label.check input { width: auto; }
 tr.row-done td { color: var(--muted); }
 tr.row-done td strong { font-weight: 500; }
 .txt-bad { color: var(--bad); }
+
+/* assinantes: a observação quebra linha em vez de esticar a tabela */
+.note-wrap { white-space: normal; max-width: 320px; }

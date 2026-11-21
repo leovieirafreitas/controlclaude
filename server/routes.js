@@ -195,10 +195,20 @@ async function monthlyFor(body, before = null) {
 /** Vagas pelo painel: o admin pode pôr qualquer quantidade até 50 (o limite do plano vale só para o cliente). */
 const adminSeats = (body) => checkSeats(body.seats || 1, 50);
 
-api.get('/subscribers', h(() => all(`
-  SELECT s.*, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, p.price_cents AS plan_price_cents
-  FROM subscribers s JOIN plans p ON p.id = s.plan_id
-  ORDER BY s.status = 'aguardando' DESC, lower(s.name)`)));
+api.get('/subscribers', h(async () => {
+  const [rows, open] = await Promise.all([all(`
+    SELECT s.*, p.name AS plan_name, COALESCE(s.monthly_cents, p.price_cents) AS price_cents, p.price_cents AS plan_price_cents,
+           (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id) AS last_paid_at
+    FROM subscribers s JOIN plans p ON p.id = s.plan_id
+    ORDER BY s.status = 'aguardando' DESC, lower(s.name)`), upcomingCharges(todayISO())]);
+  // desativado por falta de pagamento: qual mensalidade ficou em aberto e desde quando
+  const byId = new Map(open.map((u) => [u.id, u]));
+  for (const s of rows) {
+    const u = s.status === 'pausado' && byId.get(s.id);
+    if (u) Object.assign(s, { unpaid_month: u.month, unpaid_due: u.due, unpaid_days: u.days, unpaid_cents: Math.max(u.amount_cents - u.paid_cents, 0) });
+  }
+  return rows;
+}));
 
 // Contas criadas na área do assinante (/conta): cadastro, e-mail confirmado e situação do plano
 api.get('/customers', h(() => all(`

@@ -1,9 +1,10 @@
 import { api } from '../api.js';
-import { $, brl, esc, fmtDate, badge, autopayBadge, today, toast, bindDialogForm } from '../utils.js';
+import { $, brl, esc, fmtDate, fmtMonth, badge, autopayBadge, today, toast, bindDialogForm, tabsHtml, whenLabel } from '../utils.js';
 import { openAdminPix } from './pix.js';
 
 let subscribers = [];
 let plans = [];
+let statusTab = ''; // aba: '' (todos) | ativo | pausado | aguardando | cancelado
 
 export async function loadSubscribers() {
   [subscribers, plans] = await Promise.all([api.subscribers(), api.plans()]);
@@ -22,13 +23,33 @@ function workspaceLine(s) {
   return '';
 }
 
+/** Desativado por falta de pagamento: qual mensalidade ficou em aberto e há quanto tempo. */
+function unpaidLine(s) {
+  if (s.status !== 'pausado' || !s.unpaid_due) return '';
+  return `<div class="muted txt-bad" title="Mensalidade de ${fmtMonth(s.unpaid_month)} em aberto">Venceu ${fmtDate(s.unpaid_due)} · ${whenLabel(s.unpaid_days)}</div>
+    <div class="muted">Deve ${brl(s.unpaid_cents)}${s.last_paid_at ? ` · último pagamento ${fmtDate(s.last_paid_at)}` : ''}</div>`;
+}
+
 function render() {
+  const count = (st) => subscribers.filter((s) => s.status === st).length;
+  $('#sub-tabs').innerHTML = tabsHtml([
+    { key: '', label: 'Todos', count: subscribers.length },
+    { key: 'ativo', label: 'Ativos', count: count('ativo') },
+    { key: 'pausado', label: 'Desativados', tone: 'bad', count: count('pausado') },
+    { key: 'aguardando', label: 'Aguardando pagamento', tone: 'warn', count: count('aguardando') },
+    { key: 'cancelado', label: 'Cancelados', count: count('cancelado') },
+  ], statusTab);
+
   const q = $('#sub-search').value.toLowerCase();
-  const list = subscribers.filter((s) => !q || [s.name, s.email, s.phone].join(' ').toLowerCase().includes(q));
+  const list = subscribers
+    .filter((s) => !statusTab || s.status === statusTab)
+    .filter((s) => !q || [s.name, s.email, s.phone].join(' ').toLowerCase().includes(q));
+  // desativados: quem venceu há menos tempo primeiro (é quem precisa ser tirado do Claude agora)
+  if (statusTab === 'pausado') list.sort((a, b) => (b.unpaid_days ?? -9999) - (a.unpaid_days ?? -9999));
 
   $('#sub-rows').innerHTML = list.map((s) => `
     <tr>
-      <td><strong>${esc(s.name)}</strong>${s.notes ? `<div class="muted">${esc(s.notes)}</div>` : ''}</td>
+      <td><strong>${esc(s.name)}</strong>${unpaidLine(s)}${s.notes ? `<div class="muted small note-wrap">${esc(s.notes)}</div>` : ''}</td>
       <td>${esc(s.email)}<div class="muted">${esc(s.phone)}${s.birth_date ? ` · nasc. ${fmtDate(s.birth_date)}` : ''}</div>${workspaceLine(s)}</td>
       <td>${esc(s.plan_name)}${s.seats > 1 ? ` <span class="badge b-ativo">${s.seats} vagas</span>` : ''} <span class="muted">· ${brl(s.price_cents)}</span>${s.plan_price_cents != null && s.plan_price_cents * (s.seats || 1) !== s.price_cents ? `<div class="muted small" title="Valor travado de quando assinou">preço atual do plano: ${brl(s.plan_price_cents * (s.seats || 1))}</div>` : ''}</td>
       <td>${fmtDate(s.start_date)}</td>
@@ -42,7 +63,7 @@ function render() {
         <button class="btn small danger" data-del="${s.id}">Excluir</button>
       </td>
     </tr>`).join('')
-    || '<tr><td colspan="7" class="empty">Nenhum assinante cadastrado.</td></tr>';
+    || `<tr><td colspan="7" class="empty">${q ? 'Nenhum assinante encontrado com essa busca.' : statusTab === 'pausado' ? 'Ninguém desativado por falta de pagamento.' : statusTab ? 'Ninguém nesta lista.' : 'Nenhum assinante cadastrado.'}</td></tr>`;
 }
 
 async function openSubscriber(sub) {
@@ -77,6 +98,10 @@ async function openSubscriber(sub) {
 
 export function initSubscribers(onChange) {
   $('#sub-search').addEventListener('input', render);
+  $('#sub-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (b) { statusTab = b.dataset.tab; render(); }
+  });
   $('#new-sub').addEventListener('click', () => openSubscriber());
 
   $('#sub-rows').addEventListener('click', async (e) => {

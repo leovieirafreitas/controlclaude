@@ -19,10 +19,20 @@ export const thisMonth = () => today().slice(0, 7);
 
 const STATUS_LABEL = {
   aguardando: 'Aguardando pagamento', pago: 'Pago', pendente: 'Pendente', atrasado: 'Atrasado', parcial: 'Parcial',
-  ativo: 'Ativo', pausado: 'Pausado', cancelado: 'Cancelado', inativo: 'Inativo',
+  ativo: 'Ativo', pausado: 'Desativado', cancelado: 'Cancelado', inativo: 'Inativo',
 };
 
-export const badge = (status) => `<span class="badge b-${status}">${STATUS_LABEL[status] || esc(status)}</span>`;
+const pluralDays = (n) => `${n} dia${n === 1 ? '' : 's'}`;
+/** Distância até uma data: "em 5 dias", "amanhã", "hoje", "há 2 dias". */
+export const whenLabel = (days) => (days === 0 ? 'hoje' : days === 1 ? 'amanhã' : days > 0 ? `em ${pluralDays(days)}` : `há ${pluralDays(-days)}`);
+/** Abas com contagem (estilo .dtabs): [{ key, label, count, tone? }]. */
+export const tabsHtml = (tabs, active) => tabs.map((t) => `
+  <button type="button" data-tab="${t.key}" class="${t.key === active ? 'active' : ''}${t.tone && t.count ? ` tone-${t.tone}` : ''}">
+    ${t.label} <span class="n">${t.count}</span>
+  </button>`).join('');
+
+// plano desativado por falta de pagamento aparece em vermelho (b-pausado, azul, fica para selos neutros)
+export const badge = (status) => `<span class="badge b-${status === 'pausado' ? 'atrasado' : status}">${STATUS_LABEL[status] || esc(status)}</span>`;
 
 export const METHOD_LABEL = {
   pix: 'Pix', credito: 'Cartão de crédito', debito: 'Cartão de débito', cartao: 'Cartão',
