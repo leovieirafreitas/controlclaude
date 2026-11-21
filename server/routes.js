@@ -390,9 +390,10 @@ export async function upcomingCharges(today) {
   const [subs, sums] = await Promise.all([
     all(`
       SELECT s.id, s.name, s.phone, s.email, s.status, s.due_day, s.start_date, s.first_month, s.first_cents, s.cancel_at,
-             s.autopay_status, s.card_last4, s.next_charge_date, p.name AS plan_name,
+             s.autopay_status, s.card_last4, s.next_charge_date, s.plan_id, p.name AS plan_name,
              COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
-             (SELECT MAX(ref_month) FROM payments WHERE subscriber_id = s.id) AS last_paid_month
+             (SELECT MAX(ref_month) FROM payments WHERE subscriber_id = s.id) AS last_paid_month,
+             (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id) AS last_paid_at
       FROM subscribers s JOIN plans p ON p.id = s.plan_id
       WHERE s.status IN ('ativo', 'pausado') AND COALESCE(s.monthly_cents, p.price_cents) > 0`),
     all('SELECT subscriber_id, ref_month, SUM(amount_cents) AS total FROM payments GROUP BY subscriber_id, ref_month'),
@@ -415,7 +416,8 @@ export async function upcomingCharges(today) {
     for (let i = 0; i < 24 && sumOf(s.id, month) >= amountFor(s, month); i++) month = shiftMonth(month, 1);
     const due = cycleDueDate(month, s.due_day);
     return {
-      id: s.id, name: s.name, phone: s.phone, email: s.email, plan_name: s.plan_name, status: s.status,
+      id: s.id, name: s.name, phone: s.phone, email: s.email, plan_id: s.plan_id, plan_name: s.plan_name, status: s.status,
+      price_cents: s.price_cents, start_date: s.start_date, last_paid_at: s.last_paid_at,
       month, due, days: Math.round((Date.parse(due) - Date.parse(today)) / 86_400_000),
       amount_cents: amountFor(s, month), paid_cents: sumOf(s.id, month),
       autopay_status: s.autopay_status, card_last4: s.card_last4, next_charge_date: s.next_charge_date,
@@ -424,6 +426,52 @@ export async function upcomingCharges(today) {
     };
   }).sort((a, b) => a.days - b.days || a.name.localeCompare(b.name, 'pt-BR'));
 }
+
+/**
+ * Quadro (kanban): cada pessoa em uma coluna, conforme a situação de HOJE. Os cartões mudam de coluna sozinhos
+ * quando a situação muda (pagou, venceu, foi desativado...). Nada é arrastado à mão.
+ *   espera     na lista de espera, ainda sem conta
+ *   processo   criou conta ou escolheu o plano, mas ainda não pagou
+ *   emdia      assinante ativo, próximo vencimento a mais de 7 dias
+ *   vence      vence nos próximos 7 dias
+ *   atraso     vence hoje ou já venceu (ainda ativo)
+ *   desativado plano desativado por falta de pagamento
+ *   cancelado  não é mais assinante
+ */
+const BOARD_SOON_DAYS = 7;
+api.get('/board', h(async () => {
+  const today = todayISO();
+  const [open, others, leads, waiting, plans] = await Promise.all([
+    upcomingCharges(today),
+    all(`
+      SELECT s.id, s.name, s.phone, s.email, s.status, s.start_date, s.plan_id, p.name AS plan_name,
+             COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
+             (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id) AS last_paid_at
+      FROM subscribers s JOIN plans p ON p.id = s.plan_id
+      WHERE s.status IN ('aguardando', 'cancelado')`),
+    all(`SELECT c.id, c.name, c.phone, c.email, c.created_at FROM customers c
+         WHERE NOT EXISTS (SELECT 1 FROM subscribers s WHERE s.customer_id = c.id)`),
+    // lista de espera: só quem ainda não criou conta (quem criou já aparece em "Em processo")
+    all(`SELECT w.id, w.name, w.phone, w.email, w.created_at FROM waitlist w
+         WHERE NOT EXISTS (SELECT 1 FROM customers c WHERE lower(c.email) = w.email)`).catch(() => []),
+    all('SELECT id, name FROM plans ORDER BY price_cents DESC'),
+  ]);
+
+  const cards = [
+    ...waiting.map((w) => ({ kind: 'espera', col: 'espera', key: `w${w.id}`, name: w.name, phone: w.phone, email: w.email, since: w.created_at })),
+    ...leads.map((c) => ({ kind: 'conta', col: 'processo', key: `c${c.id}`, name: c.name, phone: c.phone, email: c.email, since: c.created_at })),
+    ...others.map((s) => ({
+      kind: 'assinante', col: s.status === 'aguardando' ? 'processo' : 'cancelado', key: `s${s.id}`, id: s.id, status: s.status,
+      name: s.name, phone: s.phone, email: s.email, plan_id: s.plan_id, plan_name: s.plan_name,
+      price_cents: s.price_cents, amount_cents: s.price_cents, since: s.start_date, last_paid_at: s.last_paid_at,
+    })),
+    ...open.map((u) => ({
+      kind: 'assinante', key: `s${u.id}`, ...u,
+      col: u.status === 'pausado' ? 'desativado' : u.days <= 0 ? 'atraso' : u.days <= BOARD_SOON_DAYS ? 'vence' : 'emdia',
+    })),
+  ];
+  return { today, plans, cards };
+}));
 
 api.get('/dashboard', h(async ({ query }) => {
   const today = todayISO();

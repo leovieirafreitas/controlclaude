@@ -1,6 +1,7 @@
 import { api, setUnauthorizedHandler } from './api.js';
 import { $ } from './utils.js';
 import { initDashboard, loadDashboard } from './views/dashboard.js';
+import { initBoard, loadBoard } from './views/board.js';
 import { initSubscribers, loadSubscribers } from './views/subscribers.js';
 import { initCustomers, loadCustomers, refreshCustomersDot } from './views/customers.js';
 import { initWaitlist, loadWaitlist, refreshWaitlistDot } from './views/waitlist.js';
@@ -16,6 +17,7 @@ enhanceControls(); // listas e calendários com o visual do site
 
 const loaders = {
   dashboard: loadDashboard,
+  board: loadBoard,
   customers: loadCustomers,
   waitlist: loadWaitlist,
   subscribers: loadSubscribers,
@@ -183,6 +185,7 @@ $('#logout').addEventListener('click', async () => {
 });
 
 initDashboard();
+initBoard(refresh);
 initCustomers();
 initWaitlist();
 initSubscribers(refresh);
@@ -194,6 +197,7 @@ setInterval(() => { if (!$('#app').classList.contains('hidden')) refreshWhatsapp
 // Clientes: atualiza a lista (ou a bolinha de "novo cadastro") a cada 30 s, só com a aba do navegador aberta
 setInterval(() => {
   if ($('#app').classList.contains('hidden') || document.hidden) return;
+  if (currentTab === 'board' && !document.querySelector('dialog[open]')) loadBoard().catch(() => {}); // os cartões mudam de coluna sozinhos
   if (currentTab === 'customers') loadCustomers().catch(() => {});
   else refreshCustomersDot();
   if (currentTab === 'waitlist') loadWaitlist().catch(() => {});

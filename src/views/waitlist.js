@@ -33,7 +33,7 @@ function waNumber(phone) {
   if (d.length === 10 || d.length === 11) d = `55${d}`;
   return d.length >= 12 && d.length <= 13 ? d : '';
 }
-function waLink(phone) {
+export function waLink(phone) {
   const n = waNumber(phone);
   return n ? `https://wa.me/${n}` : '';
 }

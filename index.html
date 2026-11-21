@@ -54,6 +54,7 @@
       <h1 class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M44.7 19.3A18 18 0 1 0 44.7 44.7" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#fff"/><path d="M42 32h8" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".55"/></svg><span>Control <b>Claude</b></span></h1>
       <nav id="tabs" class="side-nav" aria-label="Menu do painel">
         <button data-tab="dashboard" class="active"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Dashboard</span></button>
+        <button data-tab="board"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="10" rx="1.5"/><rect x="16" y="4" width="5" height="13" rx="1.5"/></svg><span>Quadro</span></button>
         <button data-tab="customers"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Clientes</span><span class="new-dot hidden" id="cust-dot"></span></button>
         <button data-tab="waitlist"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Lista de espera</span><span class="new-dot hidden" id="wait-dot"></span></button>
         <button data-tab="subscribers"><svg class="ui-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg><span>Assinantes</span></button>
@@ -114,6 +115,21 @@
           <h3>Recebido por forma de pagamento <span class="muted" id="methods-month"></span></h3>
           <div id="by-method" class="methods"></div>
         </div>
+      </section>
+
+      <!-- QUADRO (kanban): cada pessoa na coluna da situação de hoje -->
+      <section id="tab-board" class="hidden">
+        <div class="toolbar">
+          <div>
+            <h2>Quadro</h2>
+            <p class="muted small board-hint">Cada pessoa fica na coluna da situação de hoje e muda de coluna sozinha quando paga, vence ou é desativada.</p>
+          </div>
+          <div class="filters">
+            <input type="search" id="board-search" placeholder="Buscar nome, telefone, plano" aria-label="Buscar no quadro">
+          </div>
+        </div>
+        <div class="dtabs" id="board-plans"></div>
+        <div class="board" id="board"></div>
       </section>
 
       <!-- CLIENTES (contas criadas na área do assinante) -->

@@ -93,6 +93,7 @@ export const joinWaitlist = h(async (req) => {
  * Roda ao abrir a lista no painel, então cobre qualquer jeito de ativar (site, Pix do painel, ativação à mão).
  */
 export async function pruneWaitlist() {
+  if (process.env.WAITLIST_PRUNE === 'off') return []; // só para teste local (o banco local é o de produção)
   const digits = (col) => `regexp_replace(coalesce(${col}, ''), '\\D', '', 'g')`;
   const r = await run(`
     DELETE FROM waitlist w

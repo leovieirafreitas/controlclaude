@@ -41,6 +41,7 @@ export const api = {
   logout: () => request('/logout', { method: 'POST' }),
 
   dashboard: (month) => request(`/dashboard?month=${encodeURIComponent(month)}`),
+  board: () => request('/board'),
 
   waitlist: () => request('/waitlist'),
   saveWaitlistSettings: (body) => request('/waitlist/settings', { method: 'PUT', body }),
