@@ -5,6 +5,7 @@
 //   assina dia 25 → faltam 5 dias (7 ou menos): paga os 5 dias + o mês seguinte inteiro (R$ 233,33) e só volta a pagar no dia 30 do outro mês
 //   assina dia 31 → paga os dias até o dia 30 do mês seguinte (proporcional) e depois R$ 200 todo dia 30
 //   assina dia 30 → mês cheio, sem ajuste
+//   assina dia 1, 2 ou 3 → paga a mensalidade cheia (R$ 200, sem desconto) e depois R$ 200 todo dia 30
 //
 // Configuração (tabela settings): prorata_on = on|off (padrão: on) · prorata_day = 1..30 (padrão: 30; em mês mais curto, vale o último dia)
 import { get } from './db.js';
@@ -19,6 +20,8 @@ export function dueDate(month, dueDay) {
   return `${String(month).slice(0, 7)}-${String(Math.min(Number(dueDay) || 1, last)).padStart(2, '0')}`;
 }
 const MERGE_DAYS = 7; // faltando até 7 dias para o vencimento: cobra junto o mês seguinte
+// Quem assina do dia 1 ao dia 3 paga a mensalidade cheia (sem desconto proporcional) e depois vence no dia combinado.
+export const FULL_PRICE_DAYS = 3;
 
 export async function prorataConfig() {
   const rows = await Promise.all(['prorata_on', 'prorata_day'].map((k) => get('SELECT value FROM settings WHERE key = ?', [k])));
@@ -52,6 +55,10 @@ export function firstCharge(todayISO, dueDay, monthlyCents) {
   const days = Math.round((Date.parse(dueISO) - Date.UTC(y, m - 1, d)) / 86_400_000);
   const part = Math.round((monthly * Math.min(days, 30)) / 30);
   if (before) {
+    if (d <= FULL_PRICE_DAYS && days > MERGE_DAYS) {
+      // começo do mês (dia 1 a 3): mensalidade cheia, cobrindo até o vencimento deste mês (contabilidade igual ao proporcional)
+      return { cents: monthly, month: ym(y, m - 1), days, part_cents: monthly, merged: false, full: true, next_due: dueISO };
+    }
     if (days <= MERGE_DAYS) {
       // vencimento logo ali: paga os dias que faltam + o mês que começa nele (o pagamento quita o mês atual)
       return { cents: part + monthly, month: ym(y, m), days, part_cents: part, merged: true, next_due: iso(y, m + 1) };

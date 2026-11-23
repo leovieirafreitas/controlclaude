@@ -369,7 +369,7 @@ async function memberViewByEmail(email) {
     let first = null;
     if (sub.first_month && !payments.length) {
       const f = firstCharge(todayISO(), sub.due_day, sub.price_cents);
-      if (f) { first = { cents: f.cents, part_cents: f.part_cents, days: f.days, merged: f.merged, next_due: f.next_due }; next = f.month; }
+      if (f) { first = { cents: f.cents, part_cents: f.part_cents, days: f.days, merged: f.merged, full: Boolean(f.full), next_due: f.next_due }; next = f.month; }
       else next = month;
     }
     subscription = {

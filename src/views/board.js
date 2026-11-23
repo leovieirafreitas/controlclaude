@@ -9,6 +9,7 @@ import { waLink } from './waitlist.js';
 const COLUMNS = [
   { key: 'espera', title: 'Lista de espera', hint: 'Deixou o contato, ainda sem conta', tone: '' },
   { key: 'processo', title: 'Em processo', hint: 'Criou conta ou escolheu o plano, falta pagar', tone: 'warn' },
+  { key: 'novos', title: 'Novos assinantes', hint: 'Fizeram o 1º pagamento neste mês', tone: 'new', sum: 'por mês' },
   { key: 'emdia', title: 'Em dia', hint: 'Pago. Próximo vencimento a mais de 7 dias', tone: 'ok', sum: 'por mês' },
   { key: 'vence', title: 'Vence em 7 dias', hint: 'Falta pagar a próxima mensalidade', tone: 'info', sum: 'a receber' },
   { key: 'atraso', title: 'Vence hoje ou atrasado', hint: 'Se não pagar, é desativado no dia seguinte', tone: 'bad', sum: 'a receber' },
@@ -36,6 +37,7 @@ function statusLine(c) {
     case 'processo': return c.kind === 'conta'
       ? `<span class="muted">Criou conta em ${shortDate(c.since)} · ainda sem plano</span>`
       : `<span class="k-warn">Escolheu o plano em ${shortDate(c.since)} · falta pagar</span>`;
+    case 'novos': return `<span class="k-new">Entrou ${shortDate(c.first_paid_on)}</span> <span class="muted">· vence ${shortDate(c.due)}</span>`;
     case 'emdia': return `<span class="k-ok">Próximo vencimento ${shortDate(c.due)}</span> <span class="muted">· ${whenLabel(c.days)}</span>`;
     case 'vence': return `<span class="k-info">Vence ${shortDate(c.due)} · ${whenLabel(c.days)}</span>`;
     case 'atraso': return `<span class="k-bad">${c.days === 0 ? 'Vence hoje' : `Venceu ${shortDate(c.due)} · ${whenLabel(c.days)}`}</span>`;
@@ -87,7 +89,7 @@ function render() {
     const list = cards.filter((c) => c.col === col.key).sort((a, b) =>
       (a.days ?? 0) - (b.days ?? 0) || String(b.since || '').localeCompare(String(a.since || '')) || a.name.localeCompare(b.name, 'pt-BR'));
     if (col.key === 'desativado') list.reverse(); // quem acabou de ser desativado primeiro
-    const total = col.sum ? list.reduce((s, c) => s + (col.key === 'emdia' ? c.price_cents || 0 : owed(c)), 0) : 0;
+    const total = col.sum ? list.reduce((s, c) => s + (['emdia', 'novos'].includes(col.key) ? c.price_cents || 0 : owed(c)), 0) : 0;
     return `
       <section class="k-col ${col.tone ? `tone-${col.tone}` : ''}" aria-label="${col.title}">
         <header>

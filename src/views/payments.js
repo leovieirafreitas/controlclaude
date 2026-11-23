@@ -18,7 +18,7 @@ export async function loadPayments() {
         <td>${fmtDate(p.paid_at)}</td>
         <td><strong>${esc(p.subscriber_name)}</strong></td>
         <td>${esc(p.plan_name)}</td>
-        <td>${p.is_first ? '1º pagamento (proporcional)' : fmtMonth(p.ref_month)}</td>
+        <td>${p.is_first ? '1º pagamento' : fmtMonth(p.ref_month)}</td>
         <td class="num">${brl(p.amount_cents)}</td>
         <td>${methodChip(p.method)}</td>
         <td>${p.mp_payment_id ? '<span class="badge b-ativo">Site · Mercado Pago</span>' : '<span class="badge b-pausado">Manual</span>'}</td>

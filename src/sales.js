@@ -68,7 +68,7 @@ function applySettings(settings) {
   // vencimento no mesmo dia para todos (1º pagamento proporcional)
   if (!/^(off|0|false)$/i.test(settings.prorata_on || 'on') && $('#faq-due')) {
     const day = Number(settings.prorata_day) || 30;
-    $('#faq-due').textContent = `Todo dia ${day}. No primeiro pagamento você paga só os dias até o próximo dia ${day} (valor proporcional) e, a partir daí, a mensalidade cheia todo dia ${day}${day > 28 ? ' (em fevereiro, no último dia do mês)' : ''}. Avisamos você pelo WhatsApp antes do vencimento.`;
+    $('#faq-due').textContent = `Todo dia ${day}. Quem assina do dia 1 ao dia 3 paga a mensalidade cheia; nos outros dias, o primeiro pagamento é só dos dias até o próximo dia ${day} (valor proporcional). A partir daí, a mensalidade cheia todo dia ${day}${day > 28 ? ' (em fevereiro, no último dia do mês)' : ''}. Avisamos você pelo WhatsApp antes do vencimento.`;
   }
   const wa = waLink(settings.whatsapp, 'Olá! Tenho uma dúvida sobre os planos.');
   if (wa) {

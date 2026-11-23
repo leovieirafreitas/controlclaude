@@ -393,7 +393,8 @@ export async function upcomingCharges(today) {
              s.autopay_status, s.card_last4, s.next_charge_date, s.plan_id, p.name AS plan_name,
              COALESCE(s.monthly_cents, p.price_cents) AS price_cents,
              (SELECT MAX(ref_month) FROM payments WHERE subscriber_id = s.id) AS last_paid_month,
-             (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id) AS last_paid_at
+             (SELECT MAX(paid_at) FROM payments WHERE subscriber_id = s.id) AS last_paid_at,
+             (SELECT MIN(paid_at) FROM payments WHERE subscriber_id = s.id) AS first_paid_at
       FROM subscribers s JOIN plans p ON p.id = s.plan_id
       WHERE s.status IN ('ativo', 'pausado') AND COALESCE(s.monthly_cents, p.price_cents) > 0`),
     all('SELECT subscriber_id, ref_month, SUM(amount_cents) AS total FROM payments GROUP BY subscriber_id, ref_month'),
@@ -418,6 +419,7 @@ export async function upcomingCharges(today) {
     return {
       id: s.id, name: s.name, phone: s.phone, email: s.email, plan_id: s.plan_id, plan_name: s.plan_name, status: s.status,
       price_cents: s.price_cents, start_date: s.start_date, last_paid_at: s.last_paid_at,
+      first_paid_on: s.first_paid_at ? todayISO(new Date(s.first_paid_at)) : null, // dia do 1º pagamento (fuso do negócio)
       month, due, days: Math.round((Date.parse(due) - Date.parse(today)) / 86_400_000),
       amount_cents: amountFor(s, month), paid_cents: sumOf(s.id, month),
       autopay_status: s.autopay_status, card_last4: s.card_last4, next_charge_date: s.next_charge_date,
@@ -432,7 +434,8 @@ export async function upcomingCharges(today) {
  * quando a situação muda (pagou, venceu, foi desativado...). Nada é arrastado à mão.
  *   espera     na lista de espera, ainda sem conta
  *   processo   criou conta ou escolheu o plano, mas ainda não pagou
- *   emdia      assinante ativo, próximo vencimento a mais de 7 dias
+ *   novos      fez o 1º pagamento neste mês (quem entrou do dia 1 ao 3), até faltar 7 dias para o vencimento
+ *   emdia     assinante ativo, próximo vencimento a mais de 7 dias
  *   vence      vence nos próximos 7 dias
  *   atraso     vence hoje ou já venceu (ainda ativo)
  *   desativado plano desativado por falta de pagamento
@@ -467,7 +470,8 @@ api.get('/board', h(async () => {
     })),
     ...open.map((u) => ({
       kind: 'assinante', key: `s${u.id}`, ...u,
-      col: u.status === 'pausado' ? 'desativado' : u.days <= 0 ? 'atraso' : u.days <= BOARD_SOON_DAYS ? 'vence' : 'emdia',
+      col: u.status === 'pausado' ? 'desativado' : u.days <= 0 ? 'atraso' : u.days <= BOARD_SOON_DAYS ? 'vence'
+        : String(u.first_paid_on || '').slice(0, 7) === today.slice(0, 7) ? 'novos' : 'emdia',
     })),
   ];
   return { today, plans, cards };

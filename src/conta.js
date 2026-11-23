@@ -535,6 +535,10 @@ function firstChargeNote(sub) {
   const monthly = brl(sub.plan.price_cents);
   const dias = `${f.days} dia${f.days > 1 ? 's' : ''}`;
   const due = `dia ${sub.due_day}`;
+  if (f.full) {
+    return `<strong>Primeiro pagamento: ${brl(f.cents)}</strong> (mensalidade cheia, até o ${due}).
+       Depois, <strong>${monthly} todo ${due}</strong>, a partir de ${fmtDate(f.next_due)}.`;
+  }
   return f.merged
     ? `<strong>Primeiro pagamento: ${brl(f.cents)}</strong> = ${dias} até o ${due} (${brl(f.part_cents)}) + a mensalidade seguinte (${monthly}).
        Depois, <strong>${monthly} todo ${due}</strong>, a partir de ${fmtDate(f.next_due)}.`
