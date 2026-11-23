@@ -10,8 +10,9 @@ async function loadSettings() {
   // vencimento fixo (pro rata): sem nada salvo, vale ligado no dia 30
   if (!s.prorata_on) f.prorata_on.value = 'on';
   if (!s.prorata_day) f.prorata_day.value = 30;
-  // janela de vendas: sem nada salvo, vale ligada fechando no dia 15
+  // janela de vendas: sem nada salvo, vale ligada do dia 1 ao dia 15
   if (!s.sales_window_on) f.sales_window_on.value = 'on';
+  if (!s.sales_open_day) f.sales_open_day.value = 1;
   if (!s.sales_close_day) f.sales_close_day.value = 15;
 }
 
@@ -71,6 +72,10 @@ export function initPlans() {
 
   $('#form-settings').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const f = e.target;
+    if (Number(f.sales_open_day.value || 1) > Number(f.sales_close_day.value || 15)) {
+      return toast('O dia de abertura das inscrições precisa ser antes (ou igual) ao dia de fechamento.');
+    }
     try {
       await api.saveSettings(Object.fromEntries(new FormData(e.target)));
       toast('Página de vendas atualizada');

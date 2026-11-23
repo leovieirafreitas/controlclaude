@@ -256,13 +256,14 @@
             </label>
             <label>Dia do vencimento (1 a 30)<input name="prorata_day" type="number" min="1" max="30" step="1" placeholder="30"></label>
           </div>
+          <label>Janela de vendas para clientes novos
+            <select name="sales_window_on"><option value="on">Ligada (só assinam entre o dia de abertura e o de fechamento)</option><option value="off">Desligada (assinam qualquer dia)</option></select>
+          </label>
           <div class="row2">
-            <label>Janela de vendas para clientes novos
-              <select name="sales_window_on"><option value="on">Ligada (só assinam do dia 1 ao dia de fechamento)</option><option value="off">Desligada (assinam qualquer dia)</option></select>
-            </label>
+            <label>Abre as inscrições no dia (1 a 28)<input name="sales_open_day" type="number" min="1" max="28" step="1" placeholder="1"></label>
             <label>Fecha as inscrições no dia (1 a 28)<input name="sales_close_day" type="number" min="1" max="28" step="1" placeholder="15"></label>
           </div>
-          <p class="muted small">Com a janela ligada, cliente novo só assina e faz o 1º pagamento do dia 1 até o dia de fechamento. Depois disso a página de vendas mostra quando as inscrições reabrem. Quem já é assinante paga normalmente em qualquer dia.</p>
+          <p class="muted small">Com a janela ligada, cliente novo só assina e faz o 1º pagamento do dia de abertura até o dia de fechamento, todo mês. Fora desses dias a página de vendas mostra quando as inscrições abrem. Quem já é assinante paga normalmente em qualquer dia. Quem assina do dia 1 ao dia 3 paga a mensalidade cheia.</p>
           <p class="muted small">Em fevereiro, o dia 29 ou 30 vira o último dia do mês. Cliente novo paga só os dias até o próximo vencimento e depois o valor cheio todo mês nesse dia. Faltando 7 dias ou menos, paga junto o mês seguinte. Quem já assina não muda.</p>
           <label>Título principal<input name="headline" placeholder="Escolha seu plano e comece hoje."></label>
           <label>Subtítulo<input name="subheadline" placeholder="Cadastro em menos de um minuto. Você paga por Pix e fala direto com a gente pelo WhatsApp."></label>
