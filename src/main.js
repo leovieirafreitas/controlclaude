@@ -12,6 +12,9 @@ import { enhanceControls } from './controls.js';
 import { initPush, loadPushDevice, refreshPush } from './push.js';
 import { initAdminPix } from './views/pix.js';
 import { initTemplates, loadTemplates } from './views/templates.js';
+import { initTheme } from './theme.js';
+
+initTheme();
 
 enhanceControls(); // listas e calendários com o visual do site
 
