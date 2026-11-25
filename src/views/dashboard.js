@@ -12,10 +12,11 @@ export async function loadDashboard() {
     ['Assinantes ativos', k.active_subscribers],
     ['Previsto no mês', brl(k.expected_cents)],
     ['Recebido no mês', brl(k.received_cents)],
-    ['A receber', brl(k.pending_cents)],
+    ['A receber', brl(k.pending_cents), k.pending_new_count
+      ? `${k.pending_new_cents === k.pending_cents ? 'tudo' : brl(k.pending_new_cents)} de ${k.pending_new_count} novo${k.pending_new_count > 1 ? 's' : ''} (1ª mensalidade)` : ''],
     ['Pagaram', `${k.paid_count} / ${k.active_subscribers}`],
     ['Em atraso', k.overdue_count],
-  ].map(([label, value]) => `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div></div>`).join('');
+  ].map(([label, value, sub]) => `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`).join('');
 
   const max = Math.max(1, ...data.history.map((h) => h.received_cents));
   $('#history').innerHTML = data.history.map((h) => `
@@ -64,7 +65,7 @@ function renderRows() {
       <td class="num">${brl(s.price_cents)}${s.prorata_cents ? `<div class="muted" title="1º pagamento, pago neste mês">+ ${brl(s.prorata_cents)} 1º pagamento</div>` : ''}</td>
       <td>${String(Math.min(s.due_day, new Date(Number(data.month.slice(0, 4)), Number(data.month.slice(5, 7)), 0).getDate())).padStart(2, '0')}/${month}</td>
       <td class="num">${s.paid_cents ? `${brl(s.paid_cents)}<div class="muted">${fmtDate(s.last_paid_at)} · ${(s.paid_methods || '').split(',').filter(Boolean).map(methodInline).join(' + ')}</div>` : s.prorata_cents ? '' : '—'}${s.prorata_cents ? `<div>${brl(s.prorata_cents)}</div><div class="muted">${fmtDate(s.prorata_paid_at)} · ${(s.prorata_methods || '').split(',').filter(Boolean).map(methodInline).join(' + ')} · 1º pagamento</div>` : ''}</td>
-      <td>${badge(s.pay_status)}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
+      <td>${badge(s.pay_status)}${s.first_full && s.pay_status !== 'pago' ? ' <span class="badge b-aguardando" title="Entrou com o 1º pagamento proporcional; esta é a primeira mensalidade cheia">1ª mensalidade</span>' : ''}${s.status === 'ativo' && s.cancel_at ? ` <span class="badge b-aguardando" title="Pediu cancelamento${s.retention_answer === 'nao' ? ' e confirmou no WhatsApp' : ''}">Cancela em ${fmtDate(s.cancel_at)}</span>` : ''}</td>
       <td>${s.pay_status !== 'pago' ? `<button class="btn small primary" data-quickpay="${s.id}">Marcar pago</button>` : ''}</td>
     </tr>`).join('')
     || `<tr><td colspan="7" class="empty">Nenhum assinante ${filter ? 'com este status' : 'ativo neste mês'}.</td></tr>`;

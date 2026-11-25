@@ -490,6 +490,7 @@ api.get('/dashboard', h(async ({ query }) => {
   // Todas as consultas do painel em paralelo (cada ida ao banco custa ~180 ms)
   const [subs, totals, byMethod, byPlan] = await Promise.all([all(`
     SELECT s.id, s.name, s.email, s.phone, s.due_day, s.status, s.start_date, s.cancel_at, s.retention_answer,
+           s.first_month, to_char(s.start_date, 'YYYY-MM') AS start_month,
            p.name AS plan_name,
            CASE WHEN s.first_month = ? AND s.first_cents IS NOT NULL THEN s.first_cents ELSE COALESCE(s.monthly_cents, p.price_cents) END AS price_cents,
            COALESCE((SELECT SUM(amount_cents) FROM payments WHERE subscriber_id = s.id AND ref_month = ?), 0) AS paid_cents,
@@ -518,7 +519,7 @@ api.get('/dashboard', h(async ({ query }) => {
   ]);
 
   const lastDayOfMonth = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
-  let expected = 0, coveredReceived = 0, paidCount = 0, overdueCount = 0;
+  let expected = 0, coveredReceived = 0, paidCount = 0, overdueCount = 0, pendingNew = 0, pendingNewCount = 0;
   for (const s of subs) {
     const duePassed = isPast || (isCurrent && todayDay > Math.min(s.due_day, lastDayOfMonth)); // dia 30 em fevereiro: último dia
     // o proporcional pago neste mês entra no previsto e no recebido (é dinheiro deste mês, além da mensalidade)
@@ -528,6 +529,9 @@ api.get('/dashboard', h(async ({ query }) => {
     else if (s.paid_cents > 0) s.pay_status = 'parcial';
     else s.pay_status = duePassed ? 'atrasado' : 'pendente';
     if (s.pay_status !== 'pago' && duePassed) overdueCount++;
+    // 1ª mensalidade cheia de quem entrou com o 1º pagamento proporcional (ele quitou o ciclo anterior ao da adesão)
+    s.first_full = Boolean(s.first_month && s.first_month < s.start_month && shiftMonth(s.first_month, 1) === month);
+    if (s.first_full && s.pay_status !== 'pago') { pendingNew += s.price_cents - Math.min(s.paid_cents, s.price_cents); pendingNewCount++; }
   }
 
   const totalOf = (m) => totals.find((t) => t.ref_month === m)?.total ?? 0;
@@ -539,6 +543,8 @@ api.get('/dashboard', h(async ({ query }) => {
       expected_cents: expected,
       received_cents: totalOf(month),
       pending_cents: Math.max(expected - coveredReceived, 0),
+      pending_new_cents: pendingNew, // parte do "a receber" que é 1ª mensalidade de assinante novo
+      pending_new_count: pendingNewCount,
       paid_count: paidCount,
       overdue_count: overdueCount,
     },
